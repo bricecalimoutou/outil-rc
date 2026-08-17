@@ -1,0 +1,2151 @@
+<!--
+  FEUILLE DE ROUTE — Partage du programme avec les assemblées
+  ==============================================================
+  Objectif : permettre aux assemblées locales de compléter elles-mêmes
+  le "Programme de la semaine" (intervenants), sans recopie manuelle.
+
+  Étape 1 — Outil local (ACTUEL)
+    Un seul utilisateur, données stockées dans le navigateur (localStorage).
+
+  Étape 2 — Web app hébergée + partage par lien
+    Outil hébergé en ligne (ex: GitHub Pages) + base en ligne (ex: Firebase
+    Firestore). Un bouton génère un lien à usage unique par semaine et par
+    assemblée ; l'assemblée complète les intervenants sur une mini-page
+    reprenant le même tableau ; un bouton "Synchroniser" récupère les
+    réponses dans l'outil du RC.
+
+  Étape 3 — Comptes par assemblée
+    Chaque assemblée a un accès permanent (identifiant/mot de passe) au
+    lieu d'un lien à usage unique. Nécessite une gestion des droits d'accès
+    plus poussée côté Firebase.
+
+  Étape 4 — PWA installable comme une appli
+    Le site devient installable sur l'écran d'accueil d'un téléphone
+    (Progressive Web App), sans passer par l'App Store/Google Play.
+
+  Étape 5 — Appli native + notifications push + stores
+    Niveau "NW Publisher" : développement mobile natif ou multiplateforme
+    (React Native/Flutter), notifications push, publication sur les stores.
+    Projet à part entière, hors du cadre d'une évolution incrémentale de
+    cet outil.
+-->
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outil RC</title>
+<style>
+  :root{ --bleu:#8a5a3d; --bleu-clair:#f0e2d0; --gris:#f5efe4; --bord:#ddd0ba; --texte:#3a2f28; --accent-bleu:#35526b; --accent-vert:#5f8a58; }
+  *{box-sizing:border-box;}
+  body{font-family:Arial, Helvetica, sans-serif; background:var(--gris); color:var(--texte); margin:0; padding:0;}
+  header{background:#ffffff; color:#fff; padding:6px 20px; height:96px; display:flex; align-items:center; border-bottom:3px solid var(--accent-bleu);}
+  header h1{margin:0; font-size:20px;}
+  header .sous{font-size:13px; opacity:.85;}
+  nav.onglets{background:#3f2c1c; display:flex; gap:2px; padding:0 20px; border-bottom:3px solid var(--accent-vert);}
+  nav.onglets button{background:transparent; color:#cfe0f2; border:none; padding:10px 16px; font-size:13px; font-weight:bold; cursor:pointer; border-radius:0;}
+  nav.onglets button.actif{background:var(--gris); color:var(--bleu);}
+  .wrap{max-width:1250px; margin:20px auto; padding:0 16px 60px;}
+  .carte{background:#fff; border:1px solid var(--bord); border-radius:8px; padding:16px 18px; margin-bottom:18px;}
+  .carte h2{margin:0 0 12px; font-size:16px; color:var(--bleu); border-bottom:2px solid var(--bleu-clair); padding-bottom:6px;}
+  .grille{display:grid; grid-template-columns:1fr 1fr; gap:10px 16px;}
+  .grille-couple{display:grid; grid-template-columns:1fr 1fr; gap:0 28px;}
+  .grille-couple > div:first-child{border-right:1px solid var(--bord); padding-right:28px;}
+  label{display:block; font-size:12px; color:#555; margin-bottom:2px;}
+  input[type=text], input[type=date], input[type=time], input[type=number], textarea, select{
+    width:100%; padding:6px 8px; border:1px solid var(--bord); border-radius:4px; font-size:14px; background:#fffdf7;
+  }
+  textarea{resize:vertical; min-height:36px;}
+  .champ{margin-bottom:8px;}
+  .actions{display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; align-items:center;}
+  button, label.btn-principal, label.btn-secondaire, label.btn-danger{cursor:pointer; border:none; border-radius:5px; padding:8px 14px; font-size:13px; font-weight:bold; display:inline-block; text-decoration:none; line-height:1.3;}
+  .btn-principal{background:var(--bleu); color:#fff;}
+  .btn-secondaire{background:#fff; color:var(--bleu); border:1px solid var(--bleu);}
+  .date-clic{cursor:pointer; font-size:12px; display:inline-block; padding:4px 8px; border:1px solid var(--bleu); border-radius:4px; color:var(--bleu); background:#fff;}
+  .date-clic:hover{background:var(--bleu-clair);}
+  .accordeon-entete{cursor:pointer; display:flex; justify-content:space-between; align-items:center;}
+  .accordeon-fleche{font-size:13px; color:var(--bleu); transition:transform .15s;}
+  .btn-danger{background:#fff; color:#b3261e; border:1px solid #b3261e;}
+  table{width:100%; border-collapse:collapse; margin-top:8px;}
+  .reunion-bloc table{table-layout:fixed;}
+  .reunion-bloc table th:nth-child(1), .reunion-bloc table td:nth-child(1){width:70px;}
+  .reunion-bloc table th:nth-child(2), .reunion-bloc table td:nth-child(2){width:38%;}
+  .reunion-bloc table th:nth-child(3), .reunion-bloc table td:nth-child(3){width:38%; overflow-wrap:break-word;}
+  .reunion-bloc table th:nth-child(4), .reunion-bloc table td:nth-child(4){width:36px;}
+  th, td{border:1px solid var(--bord); padding:5px 6px; font-size:13px; vertical-align:top;}
+  th{background:var(--bleu-clair); text-align:left; font-size:12px;}
+  td input, td textarea, td select{border:none; background:transparent; padding:2px 3px;}
+  td input:focus, td textarea:focus, td select:focus{background:#fff9db; outline:1px solid #ffd54f;}
+  .heure{width:70px; font-variant-numeric:tabular-nums; color:#555; font-size:13px;}
+  .heure-min{width:80px; text-align:center;}
+  .ch-heure{font-variant-numeric:tabular-nums; font-size:13px; color:#555;}
+  .titre-section{background:#ecdcc4 !important; font-weight:bold; text-transform:uppercase; font-size:11px; color:var(--bleu);}
+  .ligne-actions{width:34px; text-align:center;}
+  .ligne-actions button{padding:2px 6px; font-size:11px;}
+  .reunion-bloc{margin-bottom:22px;}
+  .reunion-entete{display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;}
+  .reunion-entete h3{margin:0; font-size:14px; color:#333;}
+  .reunion-entete .date-info{font-size:12px; color:#777;}
+  .ajouter-ligne{margin-top:6px; font-size:12px;}
+  .etat{font-size:12px; color:#2e7d32;}
+  .liste-semaines{font-size:12px; display:flex; align-items:center; gap:6px;}
+  .liste-semaines select{width:auto;}
+  .role-label{font-size:10px; color:#888; display:block; margin-top:2px;}
+  .cache{display:none !important;}
+  .type-badge{display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold; color:#fff;}
+  .zoneColle{width:100%; min-height:90px; font-family:monospace; font-size:12px;}
+  .cong-carte{border:1px solid var(--bord); border-radius:6px; padding:10px 12px; margin-bottom:10px; background:#fffdf7;}
+  .cong-entete{display:flex; gap:8px; align-items:center; margin-bottom:8px;}
+  .cong-entete input{font-weight:bold;}
+  .membre-ligne{display:flex; gap:6px; margin-bottom:4px; align-items:center;}
+  .membre-ligne input{flex:1;}
+  .table-membres{font-size:12px;}
+  .table-membres th{font-size:10px;}
+  .table-membres td input{width:100%;}
+  .mini-calendrier-popup{position:fixed; z-index:1000; background:#fff; border:1px solid var(--bord); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.15); padding:10px; width:220px;}
+  .mc-entete{display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:bold; color:var(--bleu); margin-bottom:8px;}
+  .mc-entete button{background:none; border:none; color:var(--bleu); font-size:16px; padding:2px 8px; font-weight:bold;}
+  .mc-grille{display:grid; grid-template-columns:repeat(7,1fr); gap:2px;}
+  .mc-jour-entete{font-size:10px; color:#999; text-align:center; font-weight:bold;}
+  .mc-jour{background:none; border:none; padding:5px 0; font-size:12px; border-radius:4px; text-align:center;}
+  .mc-jour:hover{background:var(--bleu-clair); color:var(--bleu); font-weight:bold; cursor:pointer;}
+  @media print{
+    @page{ margin:8mm; }
+    header, nav.onglets, .actions, .btn-danger, .ligne-actions, #panneauProfil, .ajouter-ligne,
+    tr[data-type="bouton"], .no-print{display:none !important;}
+    body{background:#fff; font-size:9px; line-height:1.2;}
+    h2{font-size:12px; margin:2px 0 !important;}
+    h3, .reunion-entete h3{font-size:10.5px !important; margin:0 !important;}
+    .reunion-entete{margin-bottom:0 !important;}
+    .date-info{font-size:8.5px;}
+    .carte{border:none; box-shadow:none; padding:0; margin-bottom:2px;}
+    .reunion-bloc{margin-top:0 !important; margin-bottom:2px !important;}
+    .carte:not(.reunion-bloc){break-inside:avoid;}
+    table{font-size:8.5px; border-collapse:collapse !important; margin-top:0 !important;}
+    tr{break-inside:avoid;}
+    th, td{padding:1px 3px; line-height:1.15; border:0.5pt solid #ddd0ba !important;}
+    input, select, textarea{font-size:8.5px !important; padding:1px 2px !important; min-height:0;}
+    textarea{min-height:12px !important;}
+    .heure-min{display:flex; align-items:center; gap:3px; white-space:nowrap; width:auto !important;}
+    .heure-min .ch-heure{margin:0 !important;}
+    .heure-min input{width:22px !important; margin:0 !important; padding:0 1px !important; display:inline;}
+    .ch-numero{width:60px !important; margin-bottom:1px !important;}
+    .role-label{font-size:7.5px; display:inline; margin:0 3px 0 0; color:#777;}
+    select.ch-role{display:inline-block; width:auto; max-width:140px; margin-bottom:1px;}
+    .ch-miroir{font-size:9px !important; margin:0 !important;}
+    [style*="overflow-x:auto"]{overflow:visible !important;}
+    .titre-section, .type-badge{
+      -webkit-print-color-adjust:exact; print-color-adjust:exact; color-adjust:exact;
+      padding:2px 6px !important;
+    }
+    [onclick*="ouvrirMiniCalendrierChamp"], [onclick*="ouvrirHorlogeChamp"], [onclick*="ouvrirMiniCalendrier("]{display:none !important;}
+    select, input, textarea{border-color:#ccc !important;}
+    #tablePionniers thead, #tableAnciens thead, #tableWeekend thead{display:none !important;}
+  }
+  @media (max-width: 780px){
+    .wrap{padding:0 10px 60px;}
+    .carte{padding:14px 12px;}
+    header{height:64px; padding:0 12px;}
+    nav.onglets{overflow-x:auto; white-space:nowrap; padding:0 10px; -webkit-overflow-scrolling:touch;}
+    nav.onglets button{padding:12px 14px; font-size:13px; flex:none;}
+    .grille{grid-template-columns:1fr;}
+    .grille-couple{grid-template-columns:1fr; gap:0;}
+    .grille-couple > div:first-child{border-right:none; border-bottom:1px solid var(--bord); padding-right:0; padding-bottom:10px; margin-bottom:10px;}
+    input[type=text], input[type=date], input[type=time], input[type=number], textarea, select{
+      font-size:16px; padding:9px 10px;
+    }
+    button{padding:11px 16px; font-size:14px;}
+    .actions{gap:8px;}
+    .actions button, .actions label.btn-secondaire, .actions label.btn-principal, .actions label.btn-danger{width:100%; text-align:center;}
+    .liste-semaines{width:100%; flex-wrap:wrap;}
+    .liste-semaines select{flex:1;}
+    table{font-size:12px;}
+    th, td{padding:6px 4px;}
+    .cong-entete{flex-wrap:wrap;}
+    .cong-entete input{flex:1 1 100%;}
+    .reunion-entete{flex-wrap:wrap; gap:4px;}
+    .mini-calendrier-popup{width:calc(100vw - 40px); max-width:280px;}
+  }
+</style>
+</head>
+<body>
+<div id="barreHaute" style="position:sticky;top:0;z-index:500;">
+<header>
+  <div style="display:flex;flex-direction:column;justify-content:center;height:100%;">
+  <div style="font-family:Arial, Helvetica, sans-serif; line-height:1;"><span style="font-size:34px; font-weight:900; letter-spacing:1px; color:#2c4a5e;">CIRCO</span></div>
+  <div style="font-size:11px;color:#8a5a3d;margin-left:2px;">L'assistant du responsable de circonscription — version 1.15</div>
+  </div>
+</header>
+<nav class="onglets">
+  <button id="ongletBtn-calendrier" class="actif" onclick="afficherOnglet('calendrier')">Calendrier</button>
+  <button id="ongletBtn-semaine" onclick="afficherOnglet('semaine')">Programme de la semaine</button>
+  <button id="ongletBtn-cycle" onclick="afficherOnglet('cycle')">Programme du cycle</button>
+  <button id="ongletBtn-proclamateurs" onclick="afficherOnglet('proclamateurs')">Proclamateurs</button>
+  <button id="ongletBtn-parametres" onclick="afficherOnglet('parametres')">Paramètres</button>
+  <button onclick="exporterToutesDonnees()" title="Sauvegarder toutes les données (export rapide)" style="background:transparent;padding:10px 10px;font-size:16px;">💾</button>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:4px;">
+    <button id="btnAnnuler" onclick="annulerAction()" style="background:transparent;color:#cfe0f2;" title="Annuler la dernière modification">↶ Annuler</button>
+    <button id="btnRetablir" onclick="retablirAction()" style="background:transparent;color:#cfe0f2;" title="Rétablir">↷ Rétablir</button>
+  </span>
+</nav>
+</div>
+
+<div class="wrap">
+
+<!-- ============ ONGLET CALENDRIER ============ -->
+<div id="onglet-calendrier">
+  <div class="carte">
+    <h2>Vue d'ensemble (calendrier)</h2>
+    <div class="grille">
+      <div class="champ"><label>Générer à partir du</label><input type="date" id="cal_debut"></div>
+      <div class="champ"><label>Nombre de semaines à générer</label><input type="number" id="cal_nb" value="26" min="1"></div>
+    </div>
+    <div class="actions">
+      <button class="btn-principal" onclick="genererCalendrier()">Générer les semaines manquantes</button>
+      <button class="btn-secondaire" onclick="ajouterLigneCalendrier()">+ Ajouter une ligne (événement ponctuel)</button>
+    </div>
+    <div style="overflow-x:auto;">
+    <table id="tableCalendrier">
+      <thead><tr><th style="width:75px;">Jour</th><th style="width:130px;">Date de début</th><th style="width:220px;">Type d'événement</th><th style="width:170px;">Date de fin</th><th>Note (assemblée à visiter, lieu…)</th><th style="width:90px;"></th><th class="ligne-actions"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <datalist id="listeNomsAssembleesCal"></datalist>
+  </div>
+</div>
+
+<!-- ============ ONGLET SEMAINE ============ -->
+<div id="onglet-semaine" class="cache">
+
+  <div class="carte no-print">
+    <h2>Résumé de la semaine</h2>
+    <div class="grille">
+      <div class="champ"><label>Assemblée à visiter</label><select id="s_assemblee" onchange="rafraichirTousLesSelectsRoles(); recalculerDates();"><option value="">— Choisir une assemblée —</option></select></div>
+    </div>
+    <div style="overflow-x:auto;">
+    <table style="margin-top:10px;">
+      <thead><tr><th>Réunion</th><th style="width:230px;">Date</th><th style="width:110px;">Heure</th><th>Adresse</th></tr></thead>
+      <tbody>
+        <tr><td>Réunion Vie Chrétienne et Ministère</td>
+          <td style="white-space:nowrap;"><input type="hidden" id="res_vcmDate" value=""><span class="date-clic" onclick="ouvrirMiniCalendrierChamp(this,'res_vcmDate')">📅 <span id="res_vcmDate_texte">Choisir une date</span></span></td>
+          <td><input type="text" id="res_vcmHeure" value="18:45" readonly style="cursor:pointer;width:65px;" onclick="ouvrirHorlogeChamp(this,'res_vcmHeure')"></td>
+          <td><input type="text" id="res_vcmAdresse" placeholder="Adresse par défaut (Paramètres)" onchange="recalculerDates()"></td></tr>
+        <tr><td>Réunion avec les pionniers</td>
+          <td style="white-space:nowrap;"><input type="hidden" id="res_pioDate" value=""><span class="date-clic" onclick="ouvrirMiniCalendrierChamp(this,'res_pioDate')">📅 <span id="res_pioDate_texte">Choisir une date</span></span></td>
+          <td><input type="text" id="res_pioHeure" value="17:00" readonly style="cursor:pointer;width:65px;" onclick="ouvrirHorlogeChamp(this,'res_pioHeure')"></td>
+          <td><input type="text" id="res_pioAdresse" placeholder="Adresse par défaut (Paramètres)" onchange="recalculerDates()"></td></tr>
+        <tr><td>Réunion avec les anciens et les assistants</td>
+          <td style="white-space:nowrap;"><input type="hidden" id="res_ancDate" value=""><span class="date-clic" onclick="ouvrirMiniCalendrierChamp(this,'res_ancDate')">📅 <span id="res_ancDate_texte">Choisir une date</span></span></td>
+          <td><input type="text" id="res_ancHeure" value="18:00" readonly style="cursor:pointer;width:65px;" onclick="ouvrirHorlogeChamp(this,'res_ancHeure')"></td>
+          <td><input type="text" id="res_ancAdresse" placeholder="Adresse par défaut (Paramètres)" onchange="recalculerDates()"></td></tr>
+        <tr><td>Réunion du week-end</td>
+          <td style="white-space:nowrap;"><input type="hidden" id="res_wkDate" value=""><span class="date-clic" onclick="ouvrirMiniCalendrierChamp(this,'res_wkDate')">📅 <span id="res_wkDate_texte">Choisir une date</span></span></td>
+          <td><input type="text" id="res_wkHeure" value="16:00" readonly style="cursor:pointer;width:65px;" onclick="ouvrirHorlogeChamp(this,'res_wkHeure')"></td>
+          <td><input type="text" id="res_wkAdresse" placeholder="Adresse par défaut (Paramètres)" onchange="recalculerDates()"></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="actions">
+      <button class="btn-principal" onclick="sauverSemaine()">Enregistrer cette semaine</button>
+      <button class="btn-secondaire" onclick="nouvelleSemaine()">Nouvelle semaine (modèle vierge)</button>
+      <button class="btn-secondaire no-print" onclick="window.print()">Imprimer / PDF</button>
+      <span class="etat" id="etatSemaine"></span>
+    </div>
+  </div>
+
+  <div class="carte no-print">
+    <h2>Coller le programme copié depuis wol.jw.org ou jw.org</h2>
+    <p style="font-size:12px;color:#666;margin-top:0;">Copie le texte de la page de la réunion Vie Chrétienne et Ministère sur <em>wol.jw.org</em> ou <em>jw.org</em> et colle-le ici. <strong>C'est le texte de la page qu'il faut copier, pas le lien.</strong> L'outil essaie de retrouver les cantiques, durées et intitulés pour préremplir le tableau ci-dessous.</p>
+    <textarea class="zoneColle" id="colleWOL" placeholder="Colle ici le texte copié depuis wol.jw.org ou jw.org…"></textarea>
+    <div class="actions">
+      <button class="btn-principal" onclick="analyserWOL()">Analyser et préremplir le programme VCM</button>
+      <span class="etat" id="etatWOL"></span>
+    </div>
+  </div>
+
+  <div class="carte reunion-bloc premier-bloc">
+    <div class="reunion-entete">
+      <h3>Réunion Vie Chrétienne et Ministère</h3>
+      <div class="date-info" id="dateVCM"></div>
+    </div>
+    <div style="overflow-x:auto;">
+    <table id="tableVCM">
+      <thead><tr><th class="heure">Heure</th><th>Élément du programme</th><th>Intervenants</th><th class="ligne-actions"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="carte reunion-bloc">
+    <div class="reunion-entete"><h3>Réunion avec les pionniers</h3><div class="date-info" id="datePionniers"></div></div>
+    <div style="overflow-x:auto;">
+    <table id="tablePionniers">
+      <thead><tr><th class="heure">Heure</th><th>Élément du programme</th><th>Thème</th><th class="ligne-actions"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <div class="ajouter-ligne"><button class="btn-secondaire" onclick="ajouterLigne('Pionniers')">+ Ajouter une ligne</button></div>
+  </div>
+
+  <div class="carte reunion-bloc">
+    <div class="reunion-entete"><h3>Réunion avec les anciens et les assistants</h3><div class="date-info" id="dateAnciens"></div></div>
+    <div style="overflow-x:auto;">
+    <table id="tableAnciens">
+      <thead><tr><th class="heure">Heure</th><th>Élément du programme</th><th>Thème</th><th class="ligne-actions"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <div class="ajouter-ligne"><button class="btn-secondaire" onclick="ajouterLigne('Anciens')">+ Ajouter une ligne</button></div>
+  </div>
+
+  <div class="carte reunion-bloc">
+    <div class="reunion-entete"><h3>Réunion du week-end</h3><div class="date-info" id="dateWeekend"></div></div>
+    <div style="overflow-x:auto;">
+    <table id="tableWeekend">
+      <thead><tr><th class="heure">Heure</th><th>Élément du programme</th><th>Intervenants</th><th class="ligne-actions"></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <div class="ajouter-ligne"><button class="btn-secondaire" onclick="ajouterLigne('Weekend')">+ Ajouter une ligne</button></div>
+  </div>
+
+</div>
+
+<!-- ============ ONGLET PROGRAMME DU CYCLE ============ -->
+<div id="onglet-cycle" class="cache">
+  <div class="carte">
+    <p style="font-size:12px;color:#666;margin-top:0;">Ces informations sont normalement les mêmes pendant toute une période de 6 mois (1er septembre → fin février, puis 1er mars → 31 août), mais ça peut varier — d'où les deux colonnes ci-dessous, à remplir indépendamment.</p>
+  </div>
+  <div class="carte">
+    <h2>Programme du cycle</h2>
+    <div style="overflow-x:auto;">
+    <table style="table-layout:fixed;">
+      <thead><tr><th style="width:34%;">Élément du programme</th><th style="width:33%;">Cycle 1 (septembre à février)</th><th style="width:33%;">Cycle 2 (mars à août)</th></tr></thead>
+      <tbody>
+        <tr><td>Discours de service (Thème)</td><td><input type="text" id="cy1_dsTheme"></td><td><input type="text" id="cy2_dsTheme"></td></tr>
+        <tr><td>Cantique de conclusion (Réunion de semaine)</td><td><input type="text" id="cy1_dsCantique"></td><td><input type="text" id="cy2_dsCantique"></td></tr>
+        <tr><td>Réunion des pionniers (Thème)</td><td><input type="text" id="cy1_pionniersTheme"></td><td><input type="text" id="cy2_pionniersTheme"></td></tr>
+        <tr><td>Réunion avec les anciens (Thème)</td><td><input type="text" id="cy1_anciensTheme"></td><td><input type="text" id="cy2_anciensTheme"></td></tr>
+        <tr><td>Cantique de début (Réunion du week-end)</td><td><input type="text" id="cy1_cantiqueDebutWeekend"></td><td><input type="text" id="cy2_cantiqueDebutWeekend"></td></tr>
+        <tr><td>Discours public (Thème)</td><td><input type="text" id="cy1_discoursPublicTheme"></td><td><input type="text" id="cy2_discoursPublicTheme"></td></tr>
+        <tr><td>Discours final (Thème)</td><td><input type="text" id="cy1_discoursFinalTheme"></td><td><input type="text" id="cy2_discoursFinalTheme"></td></tr>
+        <tr><td>Cantique de conclusion (Réunion du week-end)</td><td><input type="text" id="cy1_cantiqueFinWeekend"></td><td><input type="text" id="cy2_cantiqueFinWeekend"></td></tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td></td>
+          <td><button class="btn-principal" onclick="sauverCycle(1)">Enregistrer le cycle 1</button> <span class="etat" id="etatCycle1"></span></td>
+          <td><button class="btn-principal" onclick="sauverCycle(2)">Enregistrer le cycle 2</button> <span class="etat" id="etatCycle2"></span></td>
+        </tr>
+      </tfoot>
+    </table>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ONGLET PROCLAMATEURS ============ -->
+<div id="onglet-proclamateurs" class="cache">
+  <div class="carte">
+    <h2>Base des proclamateurs par assemblée locale</h2>
+    <p style="font-size:12px;color:#666;margin-top:0;">Ces noms alimentent les listes déroulantes « Élève », « Interlocuteur », « Conducteur », « Orateur »… dans le programme de la semaine.</p>
+    <div class="actions">
+      <button class="btn-principal" onclick="ajouterCongregation()">+ Ajouter une assemblée locale</button>
+    </div>
+    <div id="listeCongregations"></div>
+  </div>
+</div>
+
+<!-- ============ ONGLET PARAMÈTRES ============ -->
+<div id="onglet-parametres" class="cache">
+  <div class="carte no-print">
+    <h2 class="accordeon-entete" onclick="toggleAccordeon('acc-transfert')"><span>Transférer vers un autre appareil</span><span class="accordeon-fleche" id="acc-transfert-fleche">▸</span></h2>
+    <div class="accordeon-contenu cache" id="acc-transfert">
+    <p style="font-size:12px;color:#666;margin-top:0;">Tout est sauvegardé automatiquement, mais uniquement sur cet appareil/navigateur. Pour retrouver les mêmes infos sur ton téléphone ou un autre ordinateur : exporte un fichier ici, envoie-le toi-même (mail, Drive...), puis importe-le sur l'autre appareil.</p>
+    <div class="actions">
+      <button class="btn-principal" onclick="exporterToutesDonnees()">Exporter toutes mes données</button>
+      <label class="btn-principal" style="display:inline-block;">Importer un fichier de sauvegarde
+        <input type="file" accept=".json" onchange="importerToutesDonnees(this)" style="display:none;">
+      </label>
+      <span class="etat" id="etatSauvegarde"></span>
+    </div>
+    </div>
+  </div>
+
+  <div class="carte">
+    <h2 class="accordeon-entete" onclick="toggleAccordeon('acc-personnalisation')"><span>Personnalisation</span><span class="accordeon-fleche" id="acc-personnalisation-fleche">▸</span></h2>
+    <div class="accordeon-contenu cache" id="acc-personnalisation">
+    <p style="font-size:12px;color:#666;margin-top:0;">Modifie le nom et la couleur de chaque type d'événement du calendrier, ou ajoutes-en de nouveaux.</p>
+    <div class="actions">
+      <button class="btn-principal" onclick="ajouterTypeEvenementPerso()">+ Ajouter un type d'événement</button>
+    </div>
+    <div id="listeCouleursEvenements"></div>
+    </div>
+  </div>
+
+  <div class="carte" id="panneauProfil">
+    <h2 class="accordeon-entete" onclick="toggleAccordeon('acc-profil')"><span>Profil du responsable de circonscription et sa femme</span><span class="accordeon-fleche" id="acc-profil-fleche">▸</span></h2>
+    <div class="accordeon-contenu cache" id="acc-profil">
+    <div class="grille-couple">
+      <div>
+        <h3 style="font-size:13px;color:#555;margin:4px 0 8px;">Responsable de circonscription</h3>
+        <div class="champ"><label>Nom</label><input type="text" id="p_rcNom"></div>
+        <div class="champ"><label>Prénom</label><input type="text" id="p_rcPrenom"></div>
+        <div class="champ"><label>Téléphone</label><input type="text" id="p_rcTel"></div>
+        <div class="champ"><label>E-mail (gmail/autre)</label><input type="text" id="p_rcEmailPerso"></div>
+        <div class="champ"><label>E-mail jwpub</label><input type="text" id="p_rcEmailJw"></div>
+      </div>
+      <div>
+        <h3 style="font-size:13px;color:#555;margin:4px 0 8px;">Épouse</h3>
+        <div class="champ"><label>Nom</label><input type="text" id="p_epNom"></div>
+        <div class="champ"><label>Prénom</label><input type="text" id="p_epPrenom"></div>
+        <div class="champ"><label>Téléphone</label><input type="text" id="p_epTel"></div>
+        <div class="champ"><label>E-mail (gmail/autre)</label><input type="text" id="p_epEmailPerso"></div>
+        <div class="champ"><label>E-mail jwpub</label><input type="text" id="p_epEmailJw"></div>
+      </div>
+    </div>
+    <h3 style="font-size:13px;color:#555;margin:16px 0 8px;">Autres informations</h3>
+    <div class="grille">
+      <div class="champ"><label>Salle du Royaume / adresse</label><input type="text" id="p_salle"></div>
+      <div class="champ"><label>Informations supplémentaires</label><textarea id="p_infos" rows="1"></textarea></div>
+    </div>
+    <div class="actions">
+      <button class="btn-principal" onclick="sauverProfil()">Enregistrer le profil</button>
+      <span class="etat" id="etatProfil"></span>
+    </div>
+    </div>
+  </div>
+
+  <div class="carte">
+    <h2 class="accordeon-entete" onclick="toggleAccordeon('acc-rcsrc')"><span>Liste des RC/SRC</span><span class="accordeon-fleche" id="acc-rcsrc-fleche">▸</span></h2>
+    <div class="accordeon-contenu cache" id="acc-rcsrc">
+    <p style="font-size:12px;color:#666;margin-top:0;">Cette liste reste disponible dans toutes les assemblées, sans avoir à la ressaisir à chaque fois. Clique sur un nom pour voir/modifier ses coordonnées. Si un RC ou un SRC est actuellement rattaché à une assemblée locale (ex: toi-même), choisis-la : il apparaîtra alors automatiquement dans la fiche de cette assemblée, dans l'onglet Proclamateurs.</p>
+    <div class="actions">
+      <button class="btn-principal" onclick="ajouterRcSrc()">+ Ajouter un RC/SRC</button>
+    </div>
+    <div id="listeRcSrc"></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+/* ================= Onglets ================= */
+function afficherOnglet(nom){
+  ['calendrier','semaine','cycle','proclamateurs','parametres'].forEach(o=>{
+    document.getElementById('onglet-'+o).classList.toggle('cache', o!==nom);
+    document.getElementById('ongletBtn-'+o).classList.toggle('actif', o===nom);
+  });
+}
+function toggleAccordeon(id){
+  const contenu = document.getElementById(id);
+  const fleche = document.getElementById(id+'-fleche');
+  if(!contenu) return;
+  const vaOuvrir = contenu.classList.contains('cache');
+  contenu.classList.toggle('cache');
+  if(fleche) fleche.textContent = vaOuvrir ? '▾' : '▸';
+}
+
+/* ================= Base des cantiques (Chantons joyeusement pour Jéhovah !) ================= */
+const CANTIQUES = {'1':'Les attributs de Jéhovah','2':'Ton nom est Jéhovah','3':'Ma force, mon espérance, mon assurance','4':'« Jéhovah est mon Berger »','5':'« Tes œuvres sont prodigieuses »','6':'« Les cieux proclament la gloire de Dieu »','7':'Jéhovah, ma force','8':'Jéhovah est ton refuge','9':'Jéhovah est notre Roi !','10':'Louons Jéhovah, notre Dieu !','11':'La création loue Jéhovah','12':'Jéhovah, Dieu magnifique','13':'Christ, notre modèle','14':'Louons le nouveau Roi de la terre !','15':'Vive le Premier-né de Jéhovah !','16':'Louez Jéhovah et son Fils, l\'Oint','17':'« Je le veux »','18':'Débordants de gratitude pour la rançon','19':'Le Repas du Seigneur','20':'Tu as donné ton Fils bien-aimé','21':'Continuons à chercher d\'abord le Royaume','22':'Le Royaume est né... Qu\'il vienne !','23':'Jéhovah commence à régner','24':'Venez à la montagne de Jéhovah !','25':'Les oints, ton bien particulier','26':'« C\'est à moi que vous l\'avez fait »','27':'La révélation des fils de Dieu','28':'Ô Jéhovah, qui sera ton ami ?','29':'Nous voulons être dignes de notre nom','30':'Mon Ami, mon Dieu, mon Père','31':'Marche avec Dieu !','32':'Prends le parti de Jéhovah !','33':'« Jette ton fardeau sur Jéhovah »','34':'« Je marcherai dans mon intégrité »','35':'« Vérifions les choses les plus importantes »','36':'« Préservons nos cœurs »','37':'Je veux te servir de toute mon âme','38':'Jéhovah te rendra fort','39':'Une bonne réputation auprès de Dieu','40':'À qui appartiens-tu ?','41':'« Ô Dieu, entends ma prière »','42':'Prière des serviteurs de Dieu','43':'Prière de remerciement','44':'Prière du petit','45':'« La méditation de mon cœur »','46':'Merci, Jéhovah','47':'Prie Jéhovah chaque jour','48':'Marchons avec Jéhovah jour après jour','49':'Jéhovah, nous réjouirons ton cœur','50':'Prière d\'offrande de soi','51':'Je me suis voué à Dieu','52':'L\'offrande de soi et le baptême','53':'Motivé pour prêcher','54':'« C\'est ici le chemin »','55':'Ne les crains pas !','56':'Vis la vérité !','57':'Prêchons à toutes sortes de gens','58':'Cherchons les amis de la paix','59':'Loue Jah avec moi !','60':'Sauver leurs vies','61':'Témoins, en avant !','62':'Le chant nouveau','63':'Nous sommes Témoins de Jéhovah !','64':'Joyeux dans la moisson','65':'Va, progresse !','66':'Annonçons la bonne nouvelle','67':'« Prêche la parole »','68':'Sème la semence du Royaume','69':'Allons, prêchons le Royaume !','70':'Cherchons ceux qui sont dignes','71':'Nous sommes l\'armée de Jéhovah !','72':'Annonçons la vérité du Royaume','73':'Donne-nous de la hardiesse','74':'Chantez le Royaume !','75':'« Me voici ! Envoie-moi ! »','76':'Dis, qu\'est-ce que tu ressens ?','77':'La lumière dans un monde enténébré','78':'Toi qui enseignes la Parole de Dieu','79':'Qu\'ils tiennent ferme dans la foi !','80':'« Goûtez et voyez que Jéhovah est bon »','81':'Ma vie de pionnier','82':'« Que notre lumière brille »','83':'« De maison en maison »','84':'Volontaire !','85':'Accueillons-nous les uns les autres','86':'Soyons des enseignés de Jéhovah','87':'Réconfortons-nous aux réunions','88':'« Fais-moi connaître tes voies »','89':'L\'obéissance est bénie','90':'Encourageons-nous les uns les autres','91':'Le labeur de notre amour','92':'Un édifice qui porte ton nom','93':'Bénis notre réunion','94':'Merci, Jéhovah, pour ta Parole','95':'La lumière s\'intensifie','96':'Le Livre de Dieu : un trésor','97':'La Parole de Dieu, essentielle à ta vie','98':'« Toute Écriture est inspirée de Dieu »','99':'Des frères et sœurs par myriades','100':'Accueillons-les avec hospitalité','101':'Œuvrons dans l\'unité','102':'« Venons en aide aux faibles »','103':'Les bergers, des dons de Dieu','104':'Père, donne-moi ton esprit saint','105':'« Dieu est amour »','106':'Cultivons l\'amour','107':'Imitons l\'amour de Dieu','108':'L\'amour fidèle de Dieu','109':'« Aimons intensément, avec le cœur »','110':'« La joie de Jéhovah est notre forteresse »','111':'Joyeux grâce à Dieu','112':'Jéhovah, Dieu de paix','113':'Nous avons la paix de Dieu et de Christ','114':'« Soyons patients »','115':'Gratitude pour la patience de Dieu','116':'Le pouvoir de la bonté','117':'Reflétons l\'excellence de Dieu','118':'« Donne-nous plus de foi »','119':'Nous devons avoir la foi','120':'Imitons la douceur du Christ','121':'Apprenons la maîtrise de soi','122':'Soyons fermes, inébranlables !','123':'Fidèlement soumis à l\'ordre théocratique','124':'Soyons fidèles','125':'« Heureux les miséricordieux »','126':'« Reste éveillé, tiens ferme, deviens fort »','127':'Quel genre de personne je dois être !','128':'Endure jusqu\'à la fin','129':'Gardons notre endurance','130':'Pardonnons volontiers','131':'« Ce que Dieu a uni »','132':'Désormais, nous ne faisons qu\'un','133':'Adorons Jéhovah dès la jeunesse','134':'Les enfants sont un don sacré','135':'La tendre invitation de Jéhovah : « Sois sage, mon fils »','136':'Que Jéhovah te récompense !','137':'Femmes de foi, chrétiennes fidèles','138':'La beauté des cheveux blancs','139':'Imagine-toi dans le monde nouveau','140':'Tu vivras sans fin','141':'Le miracle de la vie','142':'Tenons ferme notre espérance','143':'Continuons de veiller, de servir et d\'attendre','144':'Fixons nos regards sur le prix !','145':'Dieu nous promet le Paradis','146':'« Toutes choses nouvelles »','147':'La promesse de la vie éternelle','148':'Jéhovah, Celui qui fait échapper','149':'Chant de victoire','150':'Cherche Dieu pour être délivré','151':'Jéhovah appellera','152':'Un lieu qui célèbre ton nom sacré','153':'Donne-moi du courage !','154':'L\'amour ne disparaît jamais','155':'Le Dieu de notre joie','156':'Avec les yeux de la foi','157':'Enfin, la paix !','158':'Ton jour ne sera pas en retard !','159':'Gloire à toi, ô Jéhovah !','160':'« Une bonne nouvelle » !','161':'Faire ta volonté est mon plaisir','162':'Mes besoins spirituels','163':'Heureux sont mes yeux !'};
+
+/* ================= Modèles de programme ================= */
+const MODELES = {
+  VCM: [
+    {type:'ligne', titre:'Président', min:0, roles:['Président']},
+    {type:'ligne', titre:'1er Cantique et prière', min:5, numero:true, roles:['Prière']},
+    {type:'ligne', titre:"Paroles d'introduction", min:1, miroirDe:'Président'},
+    {type:'section', titre:'JOYAUX DE LA PAROLE DE DIEU'},
+    {type:'ligne', titre:'Joyaux de la Parole', min:10, roles:['Frère']},
+    {type:'ligne', titre:'Perles spirituelles', min:10, roles:['Frère']},
+    {type:'ligne', titre:'Lecture de la Bible', min:4, roles:['Élève']},
+    {type:'section', titre:"APPLIQUE-TOI AU MINISTÈRE"},
+    {type:'ligne', titre:'Exposé', min:7, roles:['Élève','Interlocuteur'], groupe:'expose'},
+    {type:'ligne', titre:'Exposé', min:8, roles:['Élève','Interlocuteur'], groupe:'expose'},
+    {type:'ligne', titre:'Exposé', min:0, roles:['Élève','Interlocuteur'], groupe:'expose'},
+    {type:'section', titre:'VIE CHRÉTIENNE'},
+    {type:'ligne', titre:'Cantique', min:5, numero:true},
+    {type:'ligne', titre:'Sujet VCM', min:15, roles:['Frère'], groupe:'sujetVCM'},
+    {type:'ligne', titre:'Paroles de conclusion', min:3, miroirDe:'Président'},
+    {type:'ligne', titre:"Discours de service", min:30, sousTitre:true, roles:['Orateur']},
+    {type:'ligne', titre:'Dernier Cantique', min:5, numero:true, roles:['Prière'], suivRole:{role:'Prière', deTitre:'Discours de service', deRole:'Orateur'}},
+  ],
+  Pionniers: [ {type:'ligne', titre:'Réunion avec les pionniers (Auxiliaire, Permanent, Spéciaux, Missionnaire)', min:60, sousTitre:true} ],
+  Anciens: [ {type:'ligne', titre:'Réunion avec les anciens et les assistants', min:120, sousTitre:true} ],
+  Weekend: [
+    {type:'ligne', titre:'Cantique choisi par le RC', min:5, numero:true, roles:['Président']},
+    {type:'ligne', titre:'Thème du discours public', min:30, sousTitre:true, roles:['Orateur']},
+    {type:'ligne', titre:'1er Cantique de la Tour de Garde', min:5},
+    {type:'ligne', titre:"L'étude de la Tour de Garde", min:30, roles:['Conducteur']},
+    {type:'ligne', titre:'Thème du discours de service', min:30, sousTitre:true, roles:['Orateur'], suivRole:{role:'Orateur', deTitre:'Thème du discours public', deRole:'Orateur'}},
+    {type:'ligne', titre:'Cantique choisi par le RC', min:5, numero:true, roles:['Prière'], suivRole:{role:'Prière', deTitre:'Thème du discours de service', deRole:'Orateur'}},
+  ],
+};
+
+const TYPES_EVENEMENT = [
+  {id:'locale', label:'Visite assemblée locale', couleur:'#5b7ea3', dureeJours:6},
+  {id:'circonscription', label:'Assemblée de circonscription', couleur:'#8a7196', dureeJours:1},
+  {id:'regionale', label:'Assemblée régionale', couleur:'#b06f52', dureeJours:3},
+  {id:'memorial', label:'Mémorial', couleur:'#5e9080', dureeJours:1},
+  {id:'ecole_pionniers', label:'École des pionniers', couleur:'#bd8548', dureeJours:6},
+  {id:'ecole_anciens', label:'École anciens/assistants', couleur:'#71685c', dureeJours:5},
+  {id:'semaine_pionniers', label:'Semaine pionniers', couleur:'#748f5c', dureeJours:6},
+  {id:'libre', label:'Libre / autres / Vacances', couleur:'#9c8e7a', dureeJours:1},
+];
+function typeParId(id){ const liste = obtenirTypesEvenements(); return liste.find(t=>t.id===id) || liste[liste.length-1]; }
+function chargerTypesPerso(){
+  const raw = localStorage.getItem('rc_typesPerso');
+  const perso = raw ? JSON.parse(raw) : {};
+  return { labels: perso.labels||{}, durees: perso.durees||{}, ajouts: perso.ajouts||[] };
+}
+function sauverTypesPerso(perso){ localStorage.setItem('rc_typesPerso', JSON.stringify(perso)); }
+function obtenirTypesEvenements(){
+  const perso = chargerTypesPerso();
+  const base = TYPES_EVENEMENT.map(t => ({
+    ...t,
+    label: perso.labels[t.id] || t.label,
+    dureeJours: perso.durees[t.id] || t.dureeJours,
+  }));
+  return [...base, ...perso.ajouts];
+}
+function ajouterTypeEvenementPerso(){
+  enregistrerHistorique();
+  const perso = chargerTypesPerso();
+  const id = 'perso_' + Date.now();
+  perso.ajouts.push({id, label:'Nouveau type', couleur:'#8a5a3d', dureeJours:1});
+  sauverTypesPerso(perso);
+  rendreParametresCouleurs();
+  rendreCalendrier();
+}
+function majTypeEvenement(id, champ, valeur){
+  enregistrerHistorique();
+  const perso = chargerTypesPerso();
+  const idxAjout = perso.ajouts.findIndex(t=>t.id===id);
+  if(idxAjout > -1){
+    perso.ajouts[idxAjout][champ] = (champ==='dureeJours') ? Math.max(1, Number(valeur)||1) : valeur;
+  } else if(champ === 'label'){
+    perso.labels[id] = valeur;
+  } else if(champ === 'dureeJours'){
+    perso.durees[id] = Math.max(1, Number(valeur)||1);
+  }
+  sauverTypesPerso(perso);
+  rendreParametresCouleurs();
+  rendreCalendrier();
+}
+function supprimerTypeEvenementPerso(id){
+  if(!confirm('Supprimer ce type d\'événement ?')) return;
+  enregistrerHistorique();
+  const perso = chargerTypesPerso();
+  perso.ajouts = perso.ajouts.filter(t=>t.id!==id);
+  delete perso.labels[id];
+  delete perso.durees[id];
+  sauverTypesPerso(perso);
+  rendreParametresCouleurs();
+  rendreCalendrier();
+}
+function chargerCouleursPersonnalisees(){
+  const raw = localStorage.getItem('rc_couleursEvenements');
+  return raw ? JSON.parse(raw) : {};
+}
+function couleurEvenement(id){
+  const perso = chargerCouleursPersonnalisees();
+  return perso[id] || typeParId(id).couleur;
+}
+function majCouleurEvenement(id, couleur){
+  enregistrerHistorique();
+  const perso = chargerCouleursPersonnalisees();
+  perso[id] = couleur;
+  localStorage.setItem('rc_couleursEvenements', JSON.stringify(perso));
+  rendreParametresCouleurs();
+  rendreCalendrier();
+}
+function reinitialiserCouleurEvenement(id){
+  enregistrerHistorique();
+  const perso = chargerCouleursPersonnalisees();
+  delete perso[id];
+  localStorage.setItem('rc_couleursEvenements', JSON.stringify(perso));
+  rendreParametresCouleurs();
+  rendreCalendrier();
+}
+const PALETTE_PERSONNALISATION = [
+  '#8a5a3d','#6b4226','#bd8548','#cf9a5c','#b06f52','#a3745c','#d4901f','#71685c',
+  '#5b7ea3','#35526b','#4a8f9c','#5e9080','#5f8a58','#748f5c','#8a7196','#8b2e2e',
+  '#c17f72','#6b7f93','#a89b8a','#9c8e7a'
+];
+function hsl2hex(h, s, l){
+  s/=100; l/=100;
+  const k = n => (n + h/30) % 12;
+  const a = s * Math.min(l, 1-l);
+  const f = n => l - a*Math.max(-1, Math.min(k(n)-3, Math.min(9-k(n),1)));
+  const versHex = x => Math.round(255*x).toString(16).padStart(2,'0');
+  return '#'+versHex(f(0))+versHex(f(8))+versHex(f(4));
+}
+const TEINTES_PALETTE = [
+  {nom:'Rouille', h:15}, {nom:'Brun', h:28}, {nom:'Or', h:42}, {nom:'Olive', h:70},
+  {nom:'Vert', h:110}, {nom:'Sarcelle', h:185}, {nom:'Bleu', h:210}, {nom:'Indigo', h:250}, {nom:'Bordeaux', h:350},
+];
+function genererGrilleCouleurs(){
+  const lignes = [];
+  // ligne 1 : niveaux de gris (teinte chaude, très légèrement beige, comme le reste du thème)
+  const gris = [6,20,34,48,62,74,84,92,100].map(l => hsl2hex(30, 6, l));
+  lignes.push(gris);
+  // ligne 2 : couleurs vives (une par teinte)
+  lignes.push(TEINTES_PALETTE.map(t => hsl2hex(t.h, 48, 46)));
+  // lignes 3 à 6 : nuances de plus en plus claires, mêmes teintes
+  [28, 42, 60, 78].forEach(l=>{
+    lignes.push(TEINTES_PALETTE.map(t => hsl2hex(t.h, 38, l)));
+  });
+  return lignes;
+}
+/* Positionne un popup en coordonnées écran (position:fixed) juste sous son bouton,
+   en le recalant s'il déborde de la fenêtre. À appeler une fois le contenu du popup rempli. */
+let _fermetureAuScrollActive = false;
+function activerFermetureAuScroll(){
+  if(_fermetureAuScrollActive) return;
+  _fermetureAuScrollActive = true;
+  window.addEventListener('scroll', ()=>{
+    document.querySelectorAll('.mini-calendrier-popup').forEach(el=>el.remove());
+  }, {capture:true, passive:true});
+}
+function positionnerPopup(popup, boutonEl){
+  activerFermetureAuScroll();
+  const rect = boutonEl.getBoundingClientRect();
+  const largeur = popup.offsetWidth || 220;
+  const hauteur = popup.offsetHeight || 260;
+  let gauche = rect.left;
+  if(gauche + largeur > window.innerWidth - 8){ gauche = Math.max(8, window.innerWidth - largeur - 8); }
+  if(gauche < 8) gauche = 8;
+  let haut = rect.bottom + 4;
+  if(haut + hauteur > window.innerHeight - 8 && rect.top - hauteur - 4 > 8){
+    haut = rect.top - hauteur - 4;
+  }
+  popup.style.top = haut + 'px';
+  popup.style.left = gauche + 'px';
+}
+function ouvrirSelecteurCouleur(boutonEl, idEvenement){
+  document.querySelectorAll('.mini-calendrier-popup').forEach(el=>el.remove());
+  const popup = document.createElement('div');
+  popup.className = 'mini-calendrier-popup';
+  popup.style.width = '270px';
+  document.body.appendChild(popup);
+
+  const grille = genererGrilleCouleurs();
+  const styleCase = 'width:22px;height:22px;padding:0;cursor:pointer;border:1px solid rgba(0,0,0,.15);border-radius:3px;';
+  let html = '<div style="display:grid;grid-template-columns:repeat(9,1fr);gap:4px;margin-bottom:10px;">';
+  grille.forEach(ligne=>{
+    ligne.forEach(couleur=>{
+      html += `<button type="button" onclick="majCouleurEvenement('${idEvenement}','${couleur}');document.querySelectorAll('.mini-calendrier-popup').forEach(el=>el.remove());" style="${styleCase}background:${couleur};" title="${couleur}"></button>`;
+    });
+  });
+  html += '</div>';
+
+  // couleurs déjà utilisées ailleurs dans l'outil, pour rester cohérent d'un coup d'œil
+  const couleursUtilisees = [...new Set(obtenirTypesEvenements().map(t=>couleurEvenement(t.id)))];
+  html += '<div style="font-size:11px;color:#777;font-weight:bold;margin-bottom:4px;">PERSONNALISÉ</div>';
+  html += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">';
+  couleursUtilisees.forEach(couleur=>{
+    html += `<button type="button" onclick="majCouleurEvenement('${idEvenement}','${couleur}');document.querySelectorAll('.mini-calendrier-popup').forEach(el=>el.remove());" style="${styleCase}background:${couleur};" title="${couleur}"></button>`;
+  });
+  html += `<label style="${styleCase}display:flex;align-items:center;justify-content:center;background:#fff;position:relative;overflow:hidden;" title="Couleur personnalisée (pipette disponible)">+
+    <input type="color" onchange="majCouleurEvenement('${idEvenement}', this.value); document.querySelectorAll('.mini-calendrier-popup').forEach(el=>el.remove());" style="position:absolute;opacity:0;width:100%;height:100%;top:0;left:0;cursor:pointer;">
+  </label>`;
+  html += '</div>';
+
+  popup.innerHTML = html;
+  positionnerPopup(popup, boutonEl);
+  setTimeout(()=>{
+    document.addEventListener('click', function fermer(e){
+      if(!popup.contains(e.target) && e.target!==boutonEl){ popup.remove(); document.removeEventListener('click', fermer); }
+    });
+  },0);
+}
+function rendreParametresCouleurs(){
+  const conteneur = document.getElementById('listeCouleursEvenements');
+  if(!conteneur) return;
+  conteneur.innerHTML = obtenirTypesEvenements().map(t=>{
+    const couleurActuelle = couleurEvenement(t.id);
+    const estPerso = t.id.startsWith('perso_');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bord);flex-wrap:wrap;">
+      <button type="button" onclick="ouvrirSelecteurCouleur(this, '${t.id}')" title="Changer la couleur"
+        style="width:28px;height:28px;border-radius:50%;background:${couleurActuelle};border:1px solid rgba(0,0,0,.15);cursor:pointer;box-shadow:0 0 0 1px #ddd0ba;flex-shrink:0;"></button>
+      <input type="text" value="${esc(t.label)}" style="flex:1;min-width:160px;font-weight:bold;" onchange="majTypeEvenement('${t.id}','label',this.value)">
+      <label style="font-size:11px;color:#777;display:flex;align-items:center;gap:4px;white-space:nowrap;">Durée (jours)
+        <input type="number" min="1" value="${t.dureeJours}" style="width:55px;" onchange="majTypeEvenement('${t.id}','dureeJours',this.value)">
+      </label>
+      <button class="btn-secondaire" style="padding:4px 10px;font-size:12px;" onclick="reinitialiserCouleurEvenement('${t.id}')">Réinitialiser la couleur</button>
+      ${estPerso ? `<button class="btn-danger" style="padding:4px 10px;font-size:12px;" onclick="supprimerTypeEvenementPerso('${t.id}')">✕ Supprimer</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+let etat = { profil:{}, semaine:{} };
+
+/* ================= Historique (Annuler / Rétablir) ================= */
+let pileAnnuler = [];
+let pileRetablir = [];
+function capturerEtatComplet(){
+  const data = {};
+  Object.keys(localStorage).filter(k=>k.startsWith('rc_')).forEach(k=>{ data[k] = localStorage.getItem(k); });
+  return data;
+}
+function restaurerEtatComplet(data){
+  Object.keys(localStorage).filter(k=>k.startsWith('rc_')).forEach(k=> localStorage.removeItem(k));
+  Object.keys(data).forEach(k=> localStorage.setItem(k, data[k]));
+}
+function enregistrerHistorique(){
+  pileAnnuler.push(capturerEtatComplet());
+  if(pileAnnuler.length > 30) pileAnnuler.shift();
+  pileRetablir = [];
+}
+function rafraichirApresHistorique(){
+  chargerProfil();
+  chargerCycle(1); chargerCycle(2);
+  rendreCongregations();
+  rendreCalendrier();
+  rendreParametresCouleurs();
+  rendreListeRcSrc();
+  majListeSemaines();
+  rafraichirTousLesSelectsRoles();
+  const semaines = listerSemaines();
+  if(semaines.length){ chargerSemaineDonnees(JSON.parse(localStorage.getItem(semaines[0]))); }
+}
+function annulerAction(){
+  if(!pileAnnuler.length){ alert('Rien à annuler.'); return; }
+  pileRetablir.push(capturerEtatComplet());
+  restaurerEtatComplet(pileAnnuler.pop());
+  rafraichirApresHistorique();
+}
+function retablirAction(){
+  if(!pileRetablir.length){ alert('Rien à rétablir.'); return; }
+  pileAnnuler.push(capturerEtatComplet());
+  restaurerEtatComplet(pileRetablir.pop());
+  rafraichirApresHistorique();
+}
+
+/* ================= Utilitaires ================= */
+function val(id){ return document.getElementById(id).value; }
+function setVal(id, v){ document.getElementById(id).value = v || ''; }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function ajouterJours(dateStr, n){ const d = new Date(dateStr + 'T00:00:00'); d.setDate(d.getDate()+n); return d; }
+function isoDate(d){ return d.toISOString().slice(0,10); }
+function formatDateFr(d){ return d.toLocaleDateString('fr-FR', {weekday:'long', day:'2-digit', month:'long', year:'numeric'}); }
+
+/* ================= PROFIL ================= */
+function sauverProfil(){
+  enregistrerHistorique();
+  const p = {
+    rcNom: val('p_rcNom'), rcPrenom: val('p_rcPrenom'), rcTel: val('p_rcTel'), rcEmailPerso: val('p_rcEmailPerso'), rcEmailJw: val('p_rcEmailJw'),
+    epNom: val('p_epNom'), epPrenom: val('p_epPrenom'), epTel: val('p_epTel'), epEmailPerso: val('p_epEmailPerso'), epEmailJw: val('p_epEmailJw'),
+    salle: val('p_salle'), infos: val('p_infos')
+  };
+  localStorage.setItem('rc_profil', JSON.stringify(p));
+  etat.profil = p;
+  document.getElementById('etatProfil').textContent = 'Profil enregistré ✓';
+  setTimeout(()=>document.getElementById('etatProfil').textContent='', 2000);
+}
+function chargerProfil(){
+  const raw = localStorage.getItem('rc_profil'); if(!raw) return;
+  let p = JSON.parse(raw);
+  // migration depuis l'ancien profil (un seul champ "Nom du RC" / "Nom de l'épouse" combinés)
+  if(p.rc !== undefined && p.rcNom === undefined){
+    p = {
+      rcNom: p.rc||'', rcPrenom:'', rcTel: p.tel||'', rcEmailPerso: p.emailperso||'', rcEmailJw: p.emailjw||'',
+      epNom: p.epouse||'', epPrenom:'', epTel:'', epEmailPerso:'', epEmailJw:'',
+      salle: p.salle||'', infos:''
+    };
+  }
+  etat.profil = p;
+  setVal('p_rcNom', p.rcNom); setVal('p_rcPrenom', p.rcPrenom); setVal('p_rcTel', p.rcTel); setVal('p_rcEmailPerso', p.rcEmailPerso); setVal('p_rcEmailJw', p.rcEmailJw);
+  setVal('p_epNom', p.epNom); setVal('p_epPrenom', p.epPrenom); setVal('p_epTel', p.epTel); setVal('p_epEmailPerso', p.epEmailPerso); setVal('p_epEmailJw', p.epEmailJw);
+  setVal('p_salle', p.salle); setVal('p_infos', p.infos);
+}
+
+/* ================= PROGRAMME DU CYCLE ================= */
+const CHAMPS_CYCLE = ['dsTheme','dsCantique','pionniersTheme','anciensTheme','discoursPublicTheme','discoursFinalTheme','cantiqueDebutWeekend','cantiqueFinWeekend'];
+function sauverCycle(numero){
+  enregistrerHistorique();
+  const c = {};
+  CHAMPS_CYCLE.forEach(champ => { c[champ] = val('cy'+numero+'_'+champ); });
+  localStorage.setItem('rc_cycle'+numero, JSON.stringify(c));
+  const etatEl = document.getElementById('etatCycle'+numero);
+  etatEl.textContent = 'Cycle enregistré ✓';
+  setTimeout(()=>etatEl.textContent='', 2000);
+}
+function chargerCycle(numero){
+  const raw = localStorage.getItem('rc_cycle'+numero); if(!raw) return;
+  const c = JSON.parse(raw);
+  CHAMPS_CYCLE.forEach(champ => { setVal('cy'+numero+'_'+champ, c[champ]); });
+}
+
+/* ================= PROCLAMATEURS (base par assemblée locale) ================= */
+const ROLES_PROCLAMATEUR = [
+  {code:'', label:'—'},
+  {code:'AA', label:'Ancien'},
+  {code:'AM', label:'Assistant ministériel'},
+];
+const STATUTS_PROCLAMATEUR = [
+  {code:'', label:'—'},
+  {code:'PNB', label:'Proclamateur non baptisé'},
+  {code:'PP', label:'Pionnier permanent'},
+  {code:'SSPT', label:'Serviteur spécial à plein temps'},
+  {code:'PS', label:'Pionnier spécial'},
+  {code:'MFB', label:'Membre de la famille du Béthel'},
+  {code:'MISS', label:'Missionnaire'},
+  {code:'Inact', label:'Inactif'},
+  {code:'PAPerm', label:'Pionnier auxiliaire permanent'},
+  {code:'SAC', label:'Serviteur à la construction'},
+  {code:'RC', label:'Responsable de circonscription'},
+  {code:'SRC', label:'Suppléant responsable de circonscription'},
+];
+function membreVide(){ return {nom:'', prenom:'', sexe:'', tel:'', emailPerso:'', emailJwpub:'', role:'', statut:'', dateNaissance:'', dateBapteme:'', groupe:'', adresse:''}; }
+
+/* ================= Liste globale des RC / SRC (disponibles partout, sans duplication) ================= */
+function genererIdRcSrc(){ return 'rcsrc_' + Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+function chargerListeRcSrc(){
+  const raw = localStorage.getItem('rc_listeRcSrc');
+  const liste = raw ? JSON.parse(raw) : [];
+  liste.forEach(p=>{ if(!p.id) p.id = genererIdRcSrc(); });
+  return liste;
+}
+function sauverListeRcSrc(liste){
+  enregistrerHistorique();
+  localStorage.setItem('rc_listeRcSrc', JSON.stringify(liste));
+  rafraichirTousLesSelectsRoles();
+  rendreCongregations();
+}
+function rcSrcVide(){ return {id:genererIdRcSrc(), nom:'', prenom:'', statut:'RC', circonscription:'', tel:'', emailJwpub:'', emailPerso:'', assembleeActuelle:''}; }
+let rcSrcOuverts = new Set();
+function ajouterRcSrc(){
+  const liste = chargerListeRcSrc();
+  const nouveau = rcSrcVide();
+  liste.push(nouveau);
+  rcSrcOuverts.add(nouveau.id);
+  sauverListeRcSrc(liste);
+  rendreListeRcSrc();
+}
+function supprimerRcSrc(id){
+  const liste = chargerListeRcSrc();
+  const p = liste.find(x=>x.id===id);
+  if(!p) return;
+  const nomComplet = ((p.prenom||'')+' '+(p.nom||'')).trim() || 'cette personne';
+  if(!confirm('Supprimer '+nomComplet+' de la liste RC/SRC ?')) return;
+  sauverListeRcSrc(liste.filter(x=>x.id!==id));
+  rendreListeRcSrc();
+}
+function majChampRcSrc(id, champ, valeur){
+  const liste = chargerListeRcSrc();
+  const p = liste.find(x=>x.id===id);
+  if(!p) return;
+  p[champ] = valeur;
+  sauverListeRcSrc(liste);
+  if(champ==='nom' || champ==='prenom' || champ==='statut' || champ==='circonscription' || champ==='assembleeActuelle') rendreListeRcSrc();
+}
+function toggleRcSrc(id){
+  if(rcSrcOuverts.has(id)) rcSrcOuverts.delete(id); else rcSrcOuverts.add(id);
+  rendreListeRcSrc();
+}
+function ouvrirRcSrcDepuisAssemblee(id){
+  afficherOnglet('parametres');
+  const contenu = document.getElementById('acc-rcsrc');
+  const fleche = document.getElementById('acc-rcsrc-fleche');
+  if(contenu && contenu.classList.contains('cache')){ contenu.classList.remove('cache'); if(fleche) fleche.textContent = '▾'; }
+  rcSrcOuverts.add(id);
+  rendreListeRcSrc();
+  setTimeout(()=>{
+    const cible = document.getElementById('rcsrc-'+id);
+    if(cible) cible.scrollIntoView({behavior:'smooth', block:'center'});
+  }, 50);
+}
+function rendreListeRcSrc(){
+  const conteneur = document.getElementById('listeRcSrc');
+  if(!conteneur) return;
+  const liste = chargerListeRcSrc();
+  if(!liste.length){ conteneur.innerHTML = '<p style="color:#888;font-size:13px;">Aucun RC/SRC pour l\'instant. Clique sur « + Ajouter un RC/SRC ».</p>'; return; }
+  const congregations = chargerProclamateurs();
+  let html = '';
+  liste.forEach(p=>{
+    const ouvert = rcSrcOuverts.has(p.id);
+    const nomComplet = ((p.prenom||'')+' '+(p.nom||'')).trim() || 'Nouveau RC/SRC';
+    const couleurBadge = p.statut==='SRC' ? 'var(--accent-vert)' : 'var(--accent-bleu)';
+    html += `<div class="cong-carte" id="rcsrc-${p.id}">
+      <div class="cong-entete">
+        <button class="btn-secondaire" style="padding:4px 10px;" onclick="toggleRcSrc('${p.id}')">${ouvert?'▾':'▸'}</button>
+        <span style="font-weight:bold;flex:1;cursor:pointer;" onclick="toggleRcSrc('${p.id}')">${esc(nomComplet)}</span>
+        <span class="type-badge" style="background:${couleurBadge};">${esc(p.statut||'—')}</span>
+        ${p.circonscription ? `<span style="font-size:11px;color:#777;">${esc(p.circonscription)}</span>` : ''}
+        ${p.assembleeActuelle ? `<span style="font-size:11px;color:#777;">actuellement à ${esc(p.assembleeActuelle)}</span>` : ''}
+        <button class="btn-danger" onclick="supprimerRcSrc('${p.id}')">Supprimer</button>
+      </div>`;
+    if(ouvert){
+      html += `<div class="grille" style="margin-top:8px;">
+        <div class="champ"><label>Nom</label><input type="text" value="${esc(p.nom)}" onchange="majChampRcSrc('${p.id}','nom',this.value)"></div>
+        <div class="champ"><label>Prénom</label><input type="text" value="${esc(p.prenom)}" onchange="majChampRcSrc('${p.id}','prenom',this.value)"></div>
+        <div class="champ"><label>Statut</label>
+          <select onchange="majChampRcSrc('${p.id}','statut',this.value)">
+            <option value="RC" ${p.statut==='RC'?'selected':''}>RC — Responsable de circonscription</option>
+            <option value="SRC" ${p.statut==='SRC'?'selected':''}>SRC — Suppléant responsable de circonscription</option>
+          </select>
+        </div>
+        <div class="champ"><label>Circonscription</label><input type="text" value="${esc(p.circonscription)}" onchange="majChampRcSrc('${p.id}','circonscription',this.value)"></div>
+        <div class="champ"><label>Assemblée actuelle</label>
+          <select onchange="majChampRcSrc('${p.id}','assembleeActuelle',this.value)">
+            <option value="">— Aucune —</option>
+            ${congregations.map(c=>`<option value="${esc(c.nom)}" ${p.assembleeActuelle===c.nom?'selected':''}>${esc(c.nom)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="champ"><label>Téléphone</label><input type="text" value="${esc(p.tel)}" onchange="majChampRcSrc('${p.id}','tel',this.value)"></div>
+        <div class="champ"><label>E-mail jwpub</label><input type="text" value="${esc(p.emailJwpub)}" onchange="majChampRcSrc('${p.id}','emailJwpub',this.value)"></div>
+        <div class="champ"><label>E-mail (gmail/autre)</label><input type="text" value="${esc(p.emailPerso)}" onchange="majChampRcSrc('${p.id}','emailPerso',this.value)"></div>
+      </div>`;
+    }
+    html += `</div>`;
+  });
+  conteneur.innerHTML = html;
+}
+function parserDate(dateStr){
+  if(!dateStr) return null;
+  let m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/); // ancien format ISO (compatibilité)
+  if(m) return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+  m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // jj/mm/aaaa
+  if(m) return new Date(Number(m[3]), Number(m[2])-1, Number(m[1]));
+  return null;
+}
+function calculerAnnees(dateStr){
+  const d = parserDate(dateStr);
+  if(!d || isNaN(d.getTime())) return null;
+  const auj = new Date();
+  let annees = auj.getFullYear() - d.getFullYear();
+  const pasEncoreAnniversaire = (auj.getMonth() < d.getMonth()) || (auj.getMonth()===d.getMonth() && auj.getDate()<d.getDate());
+  if(pasEncoreAnniversaire) annees--;
+  return annees >= 0 ? annees : null;
+}
+function formaterSaisieDate(input){
+  let v = input.value.replace(/\D/g,'').slice(0,8);
+  if(v.length>=5) v = v.slice(0,2)+'/'+v.slice(2,4)+'/'+v.slice(4);
+  else if(v.length>=3) v = v.slice(0,2)+'/'+v.slice(2);
+  input.value = v;
+}
+function chargerProclamateurs(){
+  const raw = localStorage.getItem('rc_proclamateurs');
+  const liste = raw ? JSON.parse(raw) : [];
+  // migration : anciennes fiches où un membre n'était qu'une chaîne de texte (nom complet), ou sans les nouveaux champs
+  liste.forEach(c=>{
+    if(c.salle === undefined) c.salle = '';
+    if(c.infos === undefined) c.infos = '';
+    c.membres = (c.membres||[]).map(m=>{
+      if(typeof m === 'string'){ return {...membreVide(), nom:m}; }
+      return {...membreVide(), ...m};
+    });
+  });
+  return liste;
+}
+function sauverProclamateurs(liste){
+  enregistrerHistorique();
+  localStorage.setItem('rc_proclamateurs', JSON.stringify(liste));
+  rafraichirTousLesSelectsRoles();
+}
+function ajouterCongregation(){
+  const liste = chargerProclamateurs();
+  liste.push({nom:'Nouvelle assemblée locale', salle:'', infos:'', membres:[]});
+  sauverProclamateurs(liste);
+  rendreCongregations();
+}
+function majChampCongregation(idx, champ, valeur){
+  const liste = chargerProclamateurs();
+  liste[idx][champ] = valeur;
+  sauverProclamateurs(liste);
+  if(champ === 'salle') recalculerDates();
+}
+function supprimerCongregation(idx){
+  const liste = chargerProclamateurs();
+  if(!confirm('Supprimer « '+liste[idx].nom+' » et tous ses membres ?')) return;
+  const nomSupprime = liste[idx].nom;
+  liste.splice(idx,1);
+  sauverProclamateurs(liste);
+  const rcSrc = chargerListeRcSrc();
+  let modifie = false;
+  rcSrc.forEach(p=>{ if(p.assembleeActuelle === nomSupprime){ p.assembleeActuelle=''; modifie=true; } });
+  if(modifie){ localStorage.setItem('rc_listeRcSrc', JSON.stringify(rcSrc)); rendreListeRcSrc(); }
+  rendreCongregations();
+}
+function renommerCongregation(idx, valeur){
+  const liste = chargerProclamateurs();
+  const ancienNom = liste[idx].nom;
+  liste[idx].nom = valeur;
+  sauverProclamateurs(liste);
+  if(ancienNom !== valeur){
+    const rcSrc = chargerListeRcSrc();
+    let modifie = false;
+    rcSrc.forEach(p=>{ if(p.assembleeActuelle === ancienNom){ p.assembleeActuelle = valeur; modifie = true; } });
+    if(modifie){ localStorage.setItem('rc_listeRcSrc', JSON.stringify(rcSrc)); rendreListeRcSrc(); }
+  }
+}
+function ajouterMembre(idx){
+  const liste = chargerProclamateurs(); liste[idx].membres.push(membreVide()); sauverProclamateurs(liste); rendreCongregations();
+}
+function majChampMembre(idxCong, idxMembre, champ, valeur){
+  const liste = chargerProclamateurs(); liste[idxCong].membres[idxMembre][champ] = valeur; sauverProclamateurs(liste);
+}
+function supprimerMembre(idxCong, idxMembre){
+  const liste = chargerProclamateurs(); liste[idxCong].membres.splice(idxMembre,1); sauverProclamateurs(liste); rendreCongregations();
+}
+let congOuvertes = new Set();
+let importOuverts = new Set();
+function toggleCongregation(idx){
+  if(congOuvertes.has(idx)) congOuvertes.delete(idx); else congOuvertes.add(idx);
+  rendreCongregations();
+}
+function toggleImportListe(idx){
+  if(importOuverts.has(idx)) importOuverts.delete(idx); else importOuverts.add(idx);
+  rendreCongregations();
+}
+function rendreCongregations(){
+  const liste = chargerProclamateurs();
+  const conteneur = document.getElementById('listeCongregations');
+  conteneur.innerHTML = '';
+  if(!liste.length){ conteneur.innerHTML = '<p style="color:#888;font-size:13px;">Aucune assemblée locale pour l\'instant. Clique sur « + Ajouter une assemblée locale ».</p>'; return; }
+  const optionsStatuts = STATUTS_PROCLAMATEUR.map(s=>`<option value="${s.code}" title="${esc(s.label)}">${esc(s.code||'—')}</option>`).join('');
+  const optionsRoles = ROLES_PROCLAMATEUR.map(r=>`<option value="${r.code}" title="${esc(r.label)}">${esc(r.code||'—')}</option>`).join('');
+  liste.forEach((c, idxCong)=>{
+    const div = document.createElement('div');
+    div.className = 'cong-carte';
+    const ouverte = congOuvertes.has(idxCong);
+    let html = `<div class="cong-entete">
+      <button class="btn-secondaire" style="padding:4px 10px;" onclick="toggleCongregation(${idxCong})">${ouverte?'▾':'▸'}</button>
+      <input type="text" value="${esc(c.nom)}" onchange="renommerCongregation(${idxCong}, this.value)">
+      <span style="font-size:12px;color:#777;">${c.membres.length} membre(s)</span>
+      <button class="btn-secondaire" onclick="exporterCSV(${idxCong})">Exporter CSV (contacts Google)</button>
+      <button class="btn-danger" onclick="supprimerCongregation(${idxCong})">Supprimer l'assemblée</button>
+    </div>`;
+    if(ouverte){
+      html += `<div class="grille" style="margin-bottom:12px;">
+        <div class="champ"><label>Adresse de la Salle du Royaume</label><input type="text" value="${esc(c.salle)}" placeholder="Adresse complète" onchange="majChampCongregation(${idxCong},'salle',this.value)"></div>
+        <div class="champ"><label>Informations pratiques (boîte à clé, alarme, code Zoom…)</label><textarea rows="1" onchange="majChampCongregation(${idxCong},'infos',this.value)">${esc(c.infos)}</textarea></div>
+      </div>
+      <div style="overflow-x:auto;"><table class="table-membres"><thead><tr>
+        <th style="width:55px;">Sexe</th><th>Nom</th><th>Prénom</th><th style="width:55px;">Rôle</th><th style="width:65px;">Statut</th><th>Groupe</th><th>Tél.</th><th>E-mail perso</th><th>E-mail jwpub</th><th style="width:100px;">Naissance</th><th style="width:100px;">Baptême</th><th>Adresse</th><th></th>
+      </tr></thead><tbody>`;
+      c.membres.forEach((m, idxM)=>{
+        const age = calculerAnnees(m.dateNaissance);
+        const anciennete = calculerAnnees(m.dateBapteme);
+        const couleurLigne = m.sexe === 'H' ? '#eaf2fb' : (m.sexe === 'F' ? '#fde8f0' : 'transparent');
+        html += `<tr style="background:${couleurLigne};">
+          <td><select onchange="majChampMembre(${idxCong},${idxM},'sexe',this.value); rendreCongregations();">
+              <option value="" ${m.sexe===''?'selected':''}>—</option>
+              <option value="H" ${m.sexe==='H'?'selected':''}>H</option>
+              <option value="F" ${m.sexe==='F'?'selected':''}>F</option>
+            </select></td>
+          <td><input type="text" value="${esc(m.nom)}" onchange="majChampMembre(${idxCong},${idxM},'nom',this.value)"></td>
+          <td><input type="text" value="${esc(m.prenom)}" onchange="majChampMembre(${idxCong},${idxM},'prenom',this.value)"></td>
+          <td><select onchange="majChampMembre(${idxCong},${idxM},'role',this.value)">${optionsRoles.replace('value="'+m.role+'"','value="'+m.role+'" selected')}</select></td>
+          <td><select onchange="majChampMembre(${idxCong},${idxM},'statut',this.value)">${optionsStatuts.replace('value="'+m.statut+'"','value="'+m.statut+'" selected')}</select></td>
+          <td><input type="text" value="${esc(m.groupe)}" placeholder="ex: groupe 3" onchange="majChampMembre(${idxCong},${idxM},'groupe',this.value)"></td>
+          <td><input type="text" value="${esc(m.tel)}" onchange="majChampMembre(${idxCong},${idxM},'tel',this.value)"></td>
+          <td><input type="text" value="${esc(m.emailPerso)}" onchange="majChampMembre(${idxCong},${idxM},'emailPerso',this.value)"></td>
+          <td><input type="text" value="${esc(m.emailJwpub)}" onchange="majChampMembre(${idxCong},${idxM},'emailJwpub',this.value)"></td>
+          <td><input type="text" value="${esc(m.dateNaissance)}" placeholder="jj/mm/aaaa" maxlength="10" oninput="formaterSaisieDate(this)" onchange="majChampMembre(${idxCong},${idxM},'dateNaissance',this.value); rendreCongregations();">
+              ${age!==null ? `<div style="font-size:10px;color:#888;">${age} ans</div>` : ''}</td>
+          <td><input type="text" value="${esc(m.dateBapteme)}" placeholder="jj/mm/aaaa" maxlength="10" oninput="formaterSaisieDate(this)" onchange="majChampMembre(${idxCong},${idxM},'dateBapteme',this.value); rendreCongregations();">
+              ${anciennete!==null ? `<div style="font-size:10px;color:#888;">${anciennete} ans de baptême</div>` : ''}</td>
+          <td><input type="text" value="${esc(m.adresse)}" onchange="majChampMembre(${idxCong},${idxM},'adresse',this.value)"></td>
+          <td class="ligne-actions"><button class="btn-danger" onclick="supprimerMembre(${idxCong}, ${idxM})">✕</button></td>
+        </tr>`;
+      });
+      const rcSrcIci = chargerListeRcSrc().filter(p=>p.assembleeActuelle === c.nom);
+      rcSrcIci.forEach(p=>{
+        html += `<tr style="background:#fdf3da;" title="Géré depuis Paramètres > RC / SRC de la circonscription">
+          <td>—</td>
+          <td><input type="text" value="${esc(p.nom)}" disabled></td>
+          <td><input type="text" value="${esc(p.prenom)}" disabled></td>
+          <td>—</td>
+          <td><span class="type-badge" style="background:${p.statut==='SRC'?'var(--accent-vert)':'var(--accent-bleu)'};font-size:10px;">${esc(p.statut||'—')}</span></td>
+          <td>—</td>
+          <td><input type="text" value="${esc(p.tel)}" disabled></td>
+          <td><input type="text" value="${esc(p.emailPerso)}" disabled></td>
+          <td><input type="text" value="${esc(p.emailJwpub)}" disabled></td>
+          <td>—</td>
+          <td>—</td>
+          <td>—</td>
+          <td class="ligne-actions"><button class="btn-secondaire" style="font-size:10px;padding:2px 4px;" onclick="ouvrirRcSrcDepuisAssemblee('${p.id}')">Voir</button></td>
+        </tr>`;
+      });
+      html += `</tbody></table></div><button class="btn-secondaire" onclick="ajouterMembre(${idxCong})" style="margin-top:8px;">+ Ajouter un frère/une sœur</button>
+      <button class="btn-secondaire" onclick="toggleImportListe(${idxCong})" style="margin-top:8px;">Importer une liste de noms</button>`;
+      if(importOuverts.has(idxCong)){
+        html += `<div style="margin-top:8px;padding:10px;background:#fffdf7;border:1px solid var(--bord);border-radius:6px;">
+          <p style="font-size:12px;color:#666;margin:0 0 6px;">Colle ta liste ici : soit un nom par ligne (ex: <em>Dupont Jean</em>), soit — si tu copies des cellules depuis Excel/Google Sheets — plusieurs colonnes par ligne dans l'ordre <strong>Nom, Prénom, Sexe, Rôle, Statut, Groupe, Téléphone, E-mail perso, E-mail jwpub, Naissance, Baptême, Adresse</strong> (colonnes vides tolérées).</p>
+          <textarea id="texteImport-${idxCong}" class="zoneColle" placeholder="Colle ta liste ici…"></textarea>
+          <div class="actions" style="margin-bottom:0;">
+            <button class="btn-principal" onclick="importerListeMembres(${idxCong})">Ajouter ces membres</button>
+            <label class="btn-secondaire" style="display:inline-block;">Importer un fichier CSV
+              <input type="file" accept=".csv,.txt" style="display:none;" onchange="importerFichierCSV(${idxCong}, this)">
+            </label>
+            <span class="etat" id="etatImport-${idxCong}"></span>
+          </div>
+        </div>`;
+      }
+    }
+    div.innerHTML = html;
+    conteneur.appendChild(div);
+  });
+}
+function csvEchapper(v){
+  const s = String(v||'');
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function analyserLigneCSV(ligne){
+  // découpage CSV respectant les guillemets, pour que les virgules DANS un champ
+  // (ex: un groupe écrit "Nom, Prénom") ne décalent pas les colonnes suivantes
+  const champs = [];
+  let cur = '', enGuillemets = false;
+  for(let i=0; i<ligne.length; i++){
+    const c = ligne[i];
+    if(enGuillemets){
+      if(c === '"'){
+        if(ligne[i+1] === '"'){ cur += '"'; i++; }
+        else { enGuillemets = false; }
+      } else { cur += c; }
+    } else {
+      if(c === '"'){ enGuillemets = true; }
+      else if(c === ','){ champs.push(cur); cur = ''; }
+      else { cur += c; }
+    }
+  }
+  champs.push(cur);
+  return champs.map(c=>c.trim());
+}
+function analyserLigneImport(ligne){
+  const m = membreVide();
+  let champs = null;
+  if(ligne.includes('\t')) champs = ligne.split('\t').map(c=>c.trim());
+  else if(ligne.split(',').length >= 3) champs = analyserLigneCSV(ligne);
+  if(champs){
+    m.nom = champs[0]||''; m.prenom = champs[1]||'';
+    const sexeBrut = (champs[2]||'').trim().toUpperCase();
+    m.sexe = sexeBrut.startsWith('H') ? 'H' : (sexeBrut.startsWith('F') ? 'F' : '');
+    m.role = (champs[3]||'').trim();
+    m.statut = (champs[4]||'').trim();
+    m.groupe = champs[5]||''; m.tel = champs[6]||''; m.emailPerso = champs[7]||''; m.emailJwpub = champs[8]||'';
+    m.dateNaissance = champs[9]||''; m.dateBapteme = champs[10]||''; m.adresse = champs[11]||'';
+  } else if(ligne.includes(',')){
+    const parts = analyserLigneCSV(ligne);
+    m.nom = parts[0]||''; m.prenom = parts[1]||'';
+  } else {
+    const parts = ligne.trim().split(/\s+/);
+    m.nom = parts[0]||''; m.prenom = parts.slice(1).join(' ')||'';
+  }
+  return m;
+}
+function estLigneEntete(ligne){
+  // ignore une éventuelle ligne d'en-tête collée par erreur (ex: "Nom, Prénom, Sexe...")
+  const premierChamp = ligne.split(/[\t,]/)[0].trim().replace(/^"|"$/g,'');
+  return /^nom$/i.test(premierChamp);
+}
+function importerListeMembres(idxCong){
+  const zone = document.getElementById('texteImport-'+idxCong);
+  const lignes = zone.value.split('\n').map(l=>l.trim()).filter(l=>l.length && !estLigneEntete(l));
+  if(!lignes.length){ alert('Colle au moins une ligne à importer.'); return; }
+  const liste = chargerProclamateurs();
+  let compteur = 0;
+  lignes.forEach(l=>{
+    const m = analyserLigneImport(l);
+    if(m.nom){ liste[idxCong].membres.push(m); compteur++; }
+  });
+  sauverProclamateurs(liste);
+  zone.value = '';
+  rendreCongregations();
+  const etatEl = document.getElementById('etatImport-'+idxCong);
+  if(etatEl){ etatEl.style.color = '#2e7d32'; etatEl.textContent = compteur+' membre(s) ajouté(s) ✓'; }
+}
+function importerFichierCSV(idxCong, inputEl){
+  const fichier = inputEl.files[0];
+  if(!fichier) return;
+  const lecteur = new FileReader();
+  lecteur.onload = (e)=>{
+    const zone = document.getElementById('texteImport-'+idxCong);
+    if(zone){ zone.value = e.target.result; importerListeMembres(idxCong); }
+  };
+  lecteur.readAsText(fichier);
+}
+function exporterCSV(idxCong){
+  const liste = chargerProclamateurs();
+  const c = liste[idxCong];
+  const entetes = ['Name','Given Name','Family Name','E-mail 1 - Value','E-mail 2 - Value','Phone 1 - Value','Address 1 - Formatted','Notes'];
+  const lignes = [entetes.join(',')];
+  c.membres.forEach(m=>{
+    const nomComplet = (m.prenom+' '+m.nom).trim();
+    const notes = [m.role, m.statut, m.groupe ? 'Groupe: '+m.groupe : '', m.dateNaissance ? 'Naissance: '+m.dateNaissance : '', m.dateBapteme ? 'Baptême: '+m.dateBapteme : ''].filter(Boolean).join(' | ');
+    lignes.push([nomComplet, m.prenom, m.nom, m.emailPerso, m.emailJwpub, m.tel, m.adresse, notes].map(csvEchapper).join(','));
+  });
+  const blob = new Blob(["\uFEFF"+lignes.join('\r\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = (c.nom||'assemblee').replace(/[^a-z0-9]+/gi,'_') + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function remplirSelectRole(select){
+  const liste = chargerProclamateurs();
+  const assembleeChoisie = (typeof val === 'function' ? val('s_assemblee') : '').trim().toLowerCase();
+  const congFiltree = assembleeChoisie ? liste.find(c => (c.nom||'').trim().toLowerCase() === assembleeChoisie) : null;
+  const congAAfficher = congFiltree ? [congFiltree] : liste;
+  let html = '<option value="">—</option>';
+  congAAfficher.forEach(c=>{
+    const membresValides = c.membres.filter(m=>(m.nom||'').trim());
+    if(membresValides.length){
+      html += `<optgroup label="${esc(c.nom)}">`;
+      membresValides.forEach(m=>{
+        const nomComplet = (m.nom+' '+(m.prenom||'')).trim();
+        const codes = [m.role, m.statut].filter(Boolean).join(', ');
+        const affichage = nomComplet + (codes ? ' ('+codes+')' : '');
+        html += `<option value="${esc(nomComplet)}">${esc(affichage)}</option>`;
+      });
+      html += `</optgroup>`;
+    }
+  });
+  const rcSrc = chargerListeRcSrc().filter(p=>(p.nom||'').trim() || (p.prenom||'').trim());
+  if(rcSrc.length){
+    html += `<optgroup label="RC / SRC de la circonscription">`;
+    rcSrc.forEach(p=>{
+      const nomComplet = ((p.prenom||'')+' '+(p.nom||'')).trim();
+      const affichage = nomComplet + (p.statut ? ' ('+p.statut+')' : '');
+      html += `<option value="${esc(nomComplet)}">${esc(affichage)}</option>`;
+    });
+    html += `</optgroup>`;
+  }
+  const valeurActuelle = select.value;
+  select.innerHTML = html;
+  if(valeurActuelle) select.value = valeurActuelle;
+}
+function rafraichirTousLesSelectsRoles(){
+  document.querySelectorAll('select.ch-role').forEach(remplirSelectRole);
+  const selAssemblee = document.getElementById('s_assemblee');
+  if(selAssemblee){
+    const valeurActuelle = selAssemblee.value;
+    selAssemblee.innerHTML = '<option value="">— Choisir une assemblée —</option>' +
+      chargerProclamateurs().map(c=>`<option value="${esc(c.nom)}">${esc(c.nom)}</option>`).join('');
+    if(valeurActuelle) selAssemblee.value = valeurActuelle;
+  }
+  const dlCal = document.getElementById('listeNomsAssembleesCal');
+  if(dlCal){
+    dlCal.innerHTML = chargerProclamateurs().map(c=>`<option value="${esc(c.nom)}">`).join('');
+  }
+}
+
+/* ================= CALENDRIER ================= */
+function chargerCalendrier(){
+  const raw = localStorage.getItem('rc_calendrier');
+  return raw ? JSON.parse(raw) : [];
+}
+function sauverCalendrier(liste){
+  enregistrerHistorique();
+  liste.sort((a,b)=> a.date.localeCompare(b.date));
+  localStorage.setItem('rc_calendrier', JSON.stringify(liste));
+}
+function genererCalendrier(){
+  const debut = val('cal_debut');
+  const nb = Number(val('cal_nb')||26);
+  if(!debut){ alert('Choisis une date de départ.'); return; }
+  const liste = chargerCalendrier();
+  const datesExistantes = new Set(liste.map(l=>l.date));
+  for(let i=0;i<nb;i++){
+    const d = isoDate(ajouterJours(debut, i*7));
+    if(!datesExistantes.has(d)){
+      liste.push({date:d, type:'locale', note:''});
+    }
+  }
+  sauverCalendrier(liste);
+  rendreCalendrier();
+}
+function ajouterLigneCalendrier(){
+  const liste = chargerCalendrier();
+  const derniere = liste.length ? liste[liste.length-1].date : new Date().toISOString().slice(0,10);
+  liste.push({date: isoDate(ajouterJours(derniere,7)), type:'libre', note:''});
+  sauverCalendrier(liste);
+  rendreCalendrier();
+}
+function majLigneCalendrier(idx, champ, valeur){
+  const liste = chargerCalendrier();
+  liste[idx][champ] = valeur;
+  sauverCalendrier(liste);
+  rendreCalendrier();
+}
+function supprimerLigneCalendrier(idx){
+  const liste = chargerCalendrier();
+  liste.splice(idx,1);
+  sauverCalendrier(liste);
+  rendreCalendrier();
+}
+function ouvrirSemaineDepuisCalendrier(date){
+  const cleExistante = cleSemaine(date);
+  if(localStorage.getItem(cleExistante)){
+    chargerSemaineDonnees(JSON.parse(localStorage.getItem(cleExistante)), false);
+  } else {
+    setVal('s_assemblee','');
+    setVal('res_vcmDate', isoVersAffichage(date));
+    setVal('res_pioDate', isoVersAffichage(isoDate(ajouterJours(date,1))));
+    setVal('res_ancDate', isoVersAffichage(isoDate(ajouterJours(date,3))));
+    setVal('res_wkDate', isoVersAffichage(isoDate(ajouterJours(date,4))));
+    setVal('res_vcmHeure','18:45'); setVal('res_pioHeure','17:00'); setVal('res_ancHeure','18:00'); setVal('res_wkHeure','16:00');
+    Object.keys(MODELES).forEach(r=>construireTable(r, MODELES[r]));
+  }
+  recalculerDates();
+  afficherOnglet('semaine');
+}
+function capitaliser(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+function formatDateLongue(d){ return d.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'}); }
+function calculerPlage(ligne){
+  const t = typeParId(ligne.type);
+  const finIso = (t.id === 'libre' && ligne.finManuelle) ? ligne.finManuelle : isoDate(ajouterJours(ligne.date, Math.max(t.dureeJours-1,0)));
+  return { debut: ligne.date, fin: finIso };
+}
+function plagesSeChevauchent(a, b){ return a.debut <= b.fin && b.debut <= a.fin; }
+function rendreCalendrier(){
+  const liste = chargerCalendrier();
+  const tbody = document.querySelector('#tableCalendrier tbody');
+  tbody.innerHTML = '';
+  const plages = liste.map(calculerPlage);
+  liste.forEach((ligne, idx)=>{
+    const t = typeParId(ligne.type);
+    const tr = document.createElement('tr');
+    let optionsHtml = obtenirTypesEvenements().map(tp=>`<option value="${tp.id}" style="background:${couleurEvenement(tp.id)};color:#fff;" ${tp.id===ligne.type?'selected':''}>${tp.label}</option>`).join('');
+    const dateDebut = new Date(ligne.date+'T00:00:00');
+    const finCalculee = ajouterJours(ligne.date, Math.max(t.dureeJours-1,0));
+    const finLibreEditable = (t.id === 'libre');
+    const dateFin = (finLibreEditable && ligne.finManuelle) ? new Date(ligne.finManuelle+'T00:00:00') : finCalculee;
+    const celluleFin = finLibreEditable
+      ? `<span class="date-clic" onclick="ouvrirMiniCalendrierFin(this, ${idx})">📅 ${capitaliser(formatDateLongue(dateFin))}</span>`
+      : `<span style="font-size:12px;">${capitaliser(formatDateLongue(dateFin))}</span>`;
+    const enChevauchement = plages.some((p,i)=> i!==idx && plagesSeChevauchent(plages[idx], p));
+    const alerte = enChevauchement
+      ? `<div style="color:#b3261e;font-size:10px;font-weight:bold;margin-top:3px;white-space:normal;">⚠️ Chevauche une autre ligne</div>`
+      : '';
+    tr.innerHTML = `
+      <td style="font-size:11px;color:var(--bleu);font-weight:bold;">${capitaliser(dateDebut.toLocaleDateString('fr-FR',{weekday:'long'}))}</td>
+      <td style="position:relative;white-space:nowrap;">
+        <span class="date-clic" onclick="ouvrirMiniCalendrier(this, ${idx})">📅 ${capitaliser(formatDateLongue(dateDebut))}</span>
+        ${alerte}
+      </td>
+      <td><select class="select-type" style="background:${couleurEvenement(t.id)};color:#fff;font-weight:bold;border-radius:4px;" onchange="majLigneCalendrier(${idx},'type',this.value);">${optionsHtml}</select>
+          <span style="font-size:11px;color:#777;display:block;margin-top:3px;">${t.dureeJours}${t.dureeJours>1?' jours':' jour'}</span></td>
+      <td style="white-space:nowrap;">${celluleFin}</td>
+      <td><input type="text" value="${esc(ligne.note||'')}" list="listeNomsAssembleesCal" placeholder="ex: nom de l'assemblée à visiter" onchange="majLigneCalendrier(${idx},'note',this.value)"></td>
+      <td><button class="btn-secondaire" onclick="ouvrirSemaineDepuisCalendrier('${ligne.date}')">Ouvrir</button></td>
+      <td class="ligne-actions"><button class="btn-danger" onclick="supprimerLigneCalendrier(${idx})">✕</button></td>`;
+    tbody.appendChild(tr);
+    tr.querySelector('select.select-type').value = t.id;
+  });
+}
+function isoVersAffichage(iso){
+  if(!iso) return '';
+  const p = iso.split('-'); if(p.length!==3) return iso;
+  return p[2]+'/'+p[1]+'/'+p[0];
+}
+function affichageVersIso(aff){
+  const m = (aff||'').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(!m) return null;
+  return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+}
+function majLigneCalendrierDepuisTexte(idx, texteAffiche){
+  const iso = affichageVersIso(texteAffiche);
+  if(!iso){ alert('Date invalide — utilise le format jj/mm/aaaa.'); rendreCalendrier(); return; }
+  majLigneCalendrier(idx, 'date', iso);
+}
+
+/* ---- Mini calendrier maison (lundi en premier), indépendant du réglage du navigateur ---- */
+function ouvrirMiniCalendrier(boutonEl, idx){
+  document.querySelectorAll('.mini-calendrier-popup').forEach(el=>el.remove());
+  const liste = chargerCalendrier();
+  const base = liste[idx].date ? new Date(liste[idx].date+'T00:00:00') : new Date();
+  const popup = document.createElement('div');
+  popup.className = 'mini-calendrier-popup';
+  document.body.appendChild(popup);
+  dessinerMoisCalendrier(popup, base.getFullYear(), base.getMonth(), (iso)=>{ majLigneCalendrier(idx,'date',iso); popup.remove(); });
+  positionnerPopup(popup, boutonEl);
+  setTimeout(()=>{
+    document.addEventListener('click', function fermer(e){
+      if(!popup.contains(e.target) && e.target!==boutonEl){ popup.remove(); document.removeEventListener('click', fermer); }
+    });
+  },0);
+}
+function ouvrirMiniCalendrierFin(boutonEl, idx){
+  document.querySelectorAll('.mini-calendrier-popup').forEach(el=>el.remove());
+  const liste = chargerCalendrier();
+  const ligne = liste[idx];
+  const t = typeParId(ligne.type);
+  const isoBase = ligne.finManuelle || isoDate(ajouterJours(ligne.date, Math.max(t.dureeJours-1,0)));
+  const base = new Date(isoBase+'T00:00:00');
+  const popup = document.createElement('div');
+  popup.className = 'mini-calendrier-popup';
+  document.body.appendChild(popup);
+  dessinerMoisCalendrier(popup, base.getFullYear(), base.getMonth(), (iso)=>{ majLigneCalendrier(idx,'finManuelle',iso); popup.remove(); });
+  positionnerPopup(popup, boutonEl);
+  setTimeout(()=>{
+    document.addEventListener('click', function fermer(e){
+      if(!popup.contains(e.target) && e.target!==boutonEl){ popup.remove(); document.removeEventListener('click', fermer); }
+    });
+  },0);
+}
+function ouvrirMiniCalendrierChamp(boutonEl, idChamp){
+  document.querySelectorAll('.mini-calendrier-popup').forEach(el=>el.remove());
+  const champTexte = document.getElementById(idChamp);
+  const isoActuel = affichageVersIso(champTexte.value);
+  const base = isoActuel ? new Date(isoActuel+'T00:00:00') : new Date();
+  const popup = document.createElement('div');
+  popup.className = 'mini-calendrier-popup';
+  document.body.appendChild(popup);
+  dessinerMoisCalendrier(popup, base.getFullYear(), base.getMonth(), (iso)=>{
+    champTexte.value = isoVersAffichage(iso);
+    popup.remove();
+    if(idChamp === 'res_vcmDate'){ proposerAutresDatesSemaine(iso); }
+    recalculerDates();
+  });
+  positionnerPopup(popup, boutonEl);
+  setTimeout(()=>{
+    document.addEventListener('click', function fermer(e){
+      if(!popup.contains(e.target) && e.target!==boutonEl){ popup.remove(); document.removeEventListener('click', fermer); }
+    });
+  },0);
+}
+/* Quand la date de la réunion VCM (généralement le mardi) est choisie, propose les 3 autres
+   dates de la même semaine (jusqu'au dimanche) — uniquement pour les champs encore vides,
+   pour ne jamais écraser un choix déjà fait. */
+function proposerAutresDatesSemaine(isoVcm){
+  const suggestions = {
+    res_pioDate: isoDate(ajouterJours(isoVcm,1)),
+    res_ancDate: isoDate(ajouterJours(isoVcm,3)),
+    res_wkDate: isoDate(ajouterJours(isoVcm,4)),
+  };
+  Object.keys(suggestions).forEach(id=>{
+    const champ = document.getElementById(id);
+    if(champ && !champ.value){ champ.value = isoVersAffichage(suggestions[id]); }
+  });
+}
+
+/* ---- Horloge maison (cadran 24h à deux anneaux, façon Android) ---- */
+function ouvrirHorlogeChamp(boutonEl, idChamp){
+  document.querySelectorAll('.horloge-popup').forEach(el=>el.remove());
+  const champTexte = document.getElementById(idChamp);
+  const parties = (champTexte.value||'00:00').split(':').map(Number);
+  const popup = document.createElement('div');
+  popup.className = 'horloge-popup mini-calendrier-popup';
+  popup.style.width = '250px';
+  document.body.appendChild(popup);
+  const etat = { heure: parties[0]||0, minute: parties[1]||0, mode: 'heures' };
+  dessinerHorloge(popup, etat, champTexte);
+  positionnerPopup(popup, boutonEl);
+  setTimeout(()=>{
+    document.addEventListener('click', function fermer(e){
+      if(!popup.contains(e.target) && e.target!==boutonEl){ popup.remove(); document.removeEventListener('click', fermer); }
+    });
+  },0);
+}
+function dessinerHorloge(popup, etat, champTexte){
+  const pad2 = n => String(n).padStart(2,'0');
+  let html = `
+    <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:10px;font-family:Arial;">
+      <span data-mode="heures" style="cursor:pointer;font-size:26px;font-weight:bold;padding:4px 10px;border-radius:6px;background:${etat.mode==='heures'?'var(--bleu-clair)':'transparent'};color:${etat.mode==='heures'?'var(--bleu)':'#555'};">${pad2(etat.heure)}</span>
+      <span style="font-size:26px;font-weight:bold;color:#555;">:</span>
+      <span data-mode="minutes" style="cursor:pointer;font-size:26px;font-weight:bold;padding:4px 10px;border-radius:6px;background:${etat.mode==='minutes'?'var(--bleu-clair)':'transparent'};color:${etat.mode==='minutes'?'var(--bleu)':'#555'};">${pad2(etat.minute)}</span>
+    </div>
+    <div class="horloge-cadran" style="position:relative;width:210px;height:210px;margin:0 auto 10px;border-radius:50%;background:#f5efe4;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:14px;padding:4px 2px 0;">
+      <button type="button" data-action="annuler" class="btn-secondaire" style="padding:6px 12px;">Annuler</button>
+      <button type="button" data-action="ok" class="btn-principal" style="padding:6px 14px;">OK</button>
+    </div>`;
+  popup.innerHTML = html;
+  const cadran = popup.querySelector('.horloge-cadran');
+  const cx = 105, cy = 105;
+  const nombres = [];
+  if(etat.mode === 'heures'){
+    for(let i=0;i<12;i++){ nombres.push({valeur:i, rayon:82, slot:i}); nombres.push({valeur:i+12, rayon:50, slot:i}); }
+  } else {
+    for(let k=0;k<12;k++){ nombres.push({valeur:k*5, rayon:82, slot:k}); }
+  }
+  const valeurActive = etat.mode === 'heures' ? etat.heure : etat.minute;
+  const actif = nombres.find(n=>n.valeur===valeurActive) || nombres[0];
+  const angleActif = (-90 + actif.slot*30) * Math.PI/180;
+  const xActif = cx + actif.rayon*Math.cos(angleActif);
+  const yActif = cy + actif.rayon*Math.sin(angleActif);
+  let svg = `<svg width="210" height="210" style="position:absolute;top:0;left:0;pointer-events:none;">
+    <line x1="${cx}" y1="${cy}" x2="${xActif}" y2="${yActif}" stroke="var(--bleu)" stroke-width="2"></line>
+    <circle cx="${cx}" cy="${cy}" r="3" fill="var(--bleu)"></circle>
+    <circle cx="${xActif}" cy="${yActif}" r="16" fill="var(--bleu)"></circle>
+  </svg>`;
+  cadran.innerHTML = svg;
+  nombres.forEach(n=>{
+    const angle = (-90 + n.slot*30) * Math.PI/180;
+    const x = cx + n.rayon*Math.cos(angle);
+    const y = cy + n.rayon*Math.sin(angle);
+    const estActif = n.valeur === valeurActive;
+    const span = document.createElement('span');
+    span.textContent = etat.mode==='minutes' ? pad2(n.valeur) : n.valeur;
+    span.style.cssText = `position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-50%);width:28px;height:28px;line-height:28px;text-align:center;border-radius:50%;cursor:pointer;font-size:13px;font-family:Arial;${estActif?'color:#fff;font-weight:bold;':'color:#3a2f28;'}`;
+    span.onclick = (e)=>{
+      e.stopPropagation();
+      if(etat.mode === 'heures'){ etat.heure = n.valeur; etat.mode = 'minutes'; }
+      else { etat.minute = n.valeur; }
+      dessinerHorloge(popup, etat, champTexte);
+    };
+    cadran.appendChild(span);
+  });
+  popup.querySelectorAll('[data-mode]').forEach(el=>{
+    el.onclick = (e)=>{ e.stopPropagation(); etat.mode = el.dataset.mode; dessinerHorloge(popup, etat, champTexte); };
+  });
+  popup.querySelector('[data-action="annuler"]').onclick = (e)=>{ e.stopPropagation(); popup.remove(); };
+  popup.querySelector('[data-action="ok"]').onclick = (e)=>{
+    e.stopPropagation();
+    champTexte.value = pad2(etat.heure)+':'+pad2(etat.minute);
+    popup.remove();
+    recalculerDates();
+  };
+}
+function dessinerMoisCalendrier(popup, annee, mois, onChoix){
+  const NOMS_MOIS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  const JOURS = ['L','M','M','J','V','S','D'];
+  const premier = new Date(annee, mois, 1);
+  const decalage = (premier.getDay()+6)%7; // lundi = 0
+  const joursDansMois = new Date(annee, mois+1, 0).getDate();
+  let html = `<div class="mc-entete">
+    <button type="button" data-nav="-1">‹</button>
+    <span>${NOMS_MOIS[mois]} ${annee}</span>
+    <button type="button" data-nav="1">›</button>
+  </div><div class="mc-grille">`;
+  JOURS.forEach(j=> html += `<div class="mc-jour-entete">${j}</div>`);
+  for(let i=0;i<decalage;i++) html += `<div></div>`;
+  for(let j=1;j<=joursDansMois;j++){
+    const iso = annee+'-'+String(mois+1).padStart(2,'0')+'-'+String(j).padStart(2,'0');
+    html += `<button type="button" class="mc-jour" data-iso="${iso}">${j}</button>`;
+  }
+  html += `</div>`;
+  popup.innerHTML = html;
+  popup.querySelectorAll('.mc-jour').forEach(btn=> btn.onclick = (e)=>{ e.stopPropagation(); onChoix(btn.dataset.iso); });
+  popup.querySelectorAll('[data-nav]').forEach(btn=> btn.onclick = (e)=>{
+    e.stopPropagation();
+    let delta = Number(btn.dataset.nav);
+    let m2 = mois+delta, a2 = annee;
+    if(m2<0){ m2=11; a2--; } if(m2>11){ m2=0; a2++; }
+    dessinerMoisCalendrier(popup, a2, m2, onChoix);
+  });
+}
+
+/* ================= SEMAINE : sauvegarde / chargement ================= */
+function cleSemaine(date){ return 'rc_semaine_' + date; }
+function collecterSemaineCourante(){
+  return {
+    assemblee: val('s_assemblee'),
+    dates: {
+      VCM: affichageVersIso(val('res_vcmDate')),
+      Pionniers: affichageVersIso(val('res_pioDate')),
+      Anciens: affichageVersIso(val('res_ancDate')),
+      Weekend: affichageVersIso(val('res_wkDate')),
+    },
+    heures: { VCM: val('res_vcmHeure'), Pionniers: val('res_pioHeure'), Anciens: val('res_ancHeure'), Weekend: val('res_wkHeure') },
+    adresses: { VCM: val('res_vcmAdresse'), Pionniers: val('res_pioAdresse'), Anciens: val('res_ancAdresse'), Weekend: val('res_wkAdresse') },
+    reunions: { VCM: lireTable('tableVCM'), Pionniers: lireTable('tablePionniers'), Anciens: lireTable('tableAnciens'), Weekend: lireTable('tableWeekend') },
+  };
+}
+function sauverSemaine(){
+  const donnees = collecterSemaineCourante();
+  if(!donnees.dates.VCM){ alert("Renseigne au moins la date de la réunion Vie Chrétienne et Ministère dans le résumé."); return; }
+  enregistrerHistorique();
+  localStorage.setItem(cleSemaine(donnees.dates.VCM), JSON.stringify(donnees));
+  majListeSemaines();
+  document.getElementById('etatSemaine').textContent = 'Semaine enregistrée ✓';
+  setTimeout(()=>document.getElementById('etatSemaine').textContent='', 2000);
+}
+function listerSemaines(){ return Object.keys(localStorage).filter(k=>k.startsWith('rc_semaine_')).sort().reverse(); }
+function majListeSemaines(){
+  const sel = document.getElementById('selectSemaines');
+  if(!sel) return;
+  sel.innerHTML = '';
+  listerSemaines().forEach(k=>{
+    const opt = document.createElement('option'); opt.value = k; opt.textContent = k.replace('rc_semaine_',''); sel.appendChild(opt);
+  });
+}
+function dupliquerSemaine(){
+  const sel = document.getElementById('selectSemaines'); if(!sel || !sel.value) return;
+  chargerSemaineDonnees(JSON.parse(localStorage.getItem(sel.value)), true);
+}
+function nouvelleSemaine(){
+  setVal('s_assemblee','');
+  setVal('res_vcmDate',''); setVal('res_pioDate',''); setVal('res_ancDate',''); setVal('res_wkDate','');
+  setVal('res_vcmHeure','18:45'); setVal('res_pioHeure','17:00'); setVal('res_ancHeure','18:00'); setVal('res_wkHeure','16:00');
+  setVal('res_vcmAdresse',''); setVal('res_pioAdresse',''); setVal('res_ancAdresse',''); setVal('res_wkAdresse','');
+  Object.keys(MODELES).forEach(r=>construireTable(r, MODELES[r]));
+  ['VCM','Pionniers','Anciens','Weekend'].forEach(r=>document.getElementById('date'+r).textContent='');
+}
+function chargerSemaineDonnees(donnees, garderDates){
+  // migration : anciennes semaines enregistrées avec une seule "date de début" + décalages fixes
+  if(!donnees.dates && donnees.dateDebut){
+    donnees = Object.assign({}, donnees, { dates: {
+      VCM: donnees.dateDebut,
+      Pionniers: isoDate(ajouterJours(donnees.dateDebut,1)),
+      Anciens: isoDate(ajouterJours(donnees.dateDebut,3)),
+      Weekend: isoDate(ajouterJours(donnees.dateDebut,4)),
+    }});
+  }
+  setVal('s_assemblee', donnees.assemblee);
+  if(!garderDates){
+    setVal('res_vcmDate', isoVersAffichage(donnees.dates?.VCM||''));
+    setVal('res_pioDate', isoVersAffichage(donnees.dates?.Pionniers||''));
+    setVal('res_ancDate', isoVersAffichage(donnees.dates?.Anciens||''));
+    setVal('res_wkDate', isoVersAffichage(donnees.dates?.Weekend||''));
+  }
+  setVal('res_vcmHeure', donnees.heures?.VCM || '18:45');
+  setVal('res_pioHeure', donnees.heures?.Pionniers || '17:00');
+  setVal('res_ancHeure', donnees.heures?.Anciens || '18:00');
+  setVal('res_wkHeure', donnees.heures?.Weekend || '16:00');
+  setVal('res_vcmAdresse', donnees.adresses?.VCM || '');
+  setVal('res_pioAdresse', donnees.adresses?.Pionniers || '');
+  setVal('res_ancAdresse', donnees.adresses?.Anciens || '');
+  setVal('res_wkAdresse', donnees.adresses?.Weekend || '');
+  ['VCM','Pionniers','Anciens','Weekend'].forEach(r=>{
+    let lignes = donnees.reunions?.[r]?.length ? donnees.reunions[r] : MODELES[r];
+    if(r === 'VCM'){ lignes = migrerGroupesVCM(lignes); lignes = migrerAllegementVCM(lignes); }
+    if(r === 'Pionniers' || r === 'Anciens') lignes = migrerSousTitre(lignes);
+    if(r === 'Weekend') lignes = migrerWeekend(lignes);
+    construireTable(r, lignes);
+  });
+  recalculerDates();
+}
+function migrerGroupesVCM(lignes){
+  // anciennes semaines enregistrées avant l'ajout des boutons "+" par groupe : on retrouve
+  // les exposés et sujets VCM par leur intitulé pour leur redonner leur étiquette de groupe
+  lignes.forEach(l=>{
+    if(l.type !== 'ligne' || l.groupe) return;
+    if(/devoir d.[ée]l[èe]ves|^exposé$/i.test(l.titre)) l.groupe = 'expose';
+    else if(/sujet vcm/i.test(l.titre)) l.groupe = 'sujetVCM';
+  });
+  return lignes;
+}
+function migrerAllegementVCM(lignes){
+  // 1) "1er Cantique et prière" : la prière n'est plus calquée sur le président, c'est un choix libre
+  lignes.forEach(l=>{
+    if(l.titre === '1er Cantique et prière' && l.miroirDe){
+      delete l.miroirDe;
+      if(!l.roles || !l.roles.length) l.roles = ['Prière'];
+    }
+  });
+  // 2) Joyaux / Perles / Lecture / Exposés / Sujet VCM : on retire la case détail, il ne reste que les noms
+  const titresSansDetail = ['Joyaux de la Parole', 'Perles spirituelles', 'Lecture de la Bible'];
+  lignes.forEach(l=>{
+    if(l.type !== 'ligne') return;
+    if(titresSansDetail.includes(l.titre) || l.groupe === 'expose' || l.groupe === 'sujetVCM'){
+      if(l.sousTitre){ delete l.sousTitre; delete l.sousTitreValeur; }
+    }
+  });
+  // 3) "Paroles de conclusion" doit précéder "Discours de service"
+  const idxConclusion = lignes.findIndex(l=>/paroles de conclusion/i.test(l.titre));
+  const idxDiscours = lignes.findIndex(l=>/discours de service/i.test(l.titre));
+  if(idxConclusion !== -1 && idxDiscours !== -1 && idxConclusion > idxDiscours){
+    const [conclusion] = lignes.splice(idxConclusion, 1);
+    lignes.splice(idxDiscours, 0, conclusion);
+  }
+  return lignes;
+}
+function migrerSousTitre(lignes){
+  // anciennes semaines enregistrées avant l'ajout de la case thème : on la rajoute
+  // pour que le remplissage automatique depuis le cycle puisse s'y appliquer
+  lignes.forEach(l=>{ if(l.type === 'ligne' && !l.sousTitre) l.sousTitre = true; });
+  return lignes;
+}
+function migrerWeekend(lignes){
+  // anciennes semaines enregistrées avant l'ajout des cases thème/cantique du week-end
+  lignes.forEach(l=>{
+    if(l.type !== 'ligne') return;
+    if((l.titre === 'Thème du discours public' || l.titre === 'Thème du discours de service') && !l.sousTitre) l.sousTitre = true;
+    if(l.titre === 'Cantique choisi par le RC' && !l.numero) l.numero = true;
+  });
+  return lignes;
+}
+function recalculerDates(){
+  const nomAssemblee = val('s_assemblee');
+  const congChoisie = nomAssemblee ? chargerProclamateurs().find(c=>c.nom === nomAssemblee) : null;
+  const salleParDefaut = (congChoisie && congChoisie.salle) || (etat.profil && etat.profil.salle) || '';
+  const champs = [
+    {dateId:'res_vcmDate', heureId:'res_vcmHeure', adresseId:'res_vcmAdresse', spanId:'dateVCM'},
+    {dateId:'res_pioDate', heureId:'res_pioHeure', adresseId:'res_pioAdresse', spanId:'datePionniers'},
+    {dateId:'res_ancDate', heureId:'res_ancHeure', adresseId:'res_ancAdresse', spanId:'dateAnciens'},
+    {dateId:'res_wkDate', heureId:'res_wkHeure', adresseId:'res_wkAdresse', spanId:'dateWeekend'},
+  ];
+  champs.forEach(c=>{
+    const iso = affichageVersIso(val(c.dateId));
+    const span = document.getElementById(c.spanId);
+    const texteEl = document.getElementById(c.dateId+'_texte');
+    const salle = val(c.adresseId) || salleParDefaut;
+    if(iso){
+      const d = new Date(iso+'T00:00:00');
+      span.textContent = formatDateFr(d) + ' · ' + val(c.heureId) + (salle ? ' · '+salle : '');
+      if(texteEl) texteEl.textContent = capitaliser(formatDateLongue(d));
+    } else {
+      span.textContent = '';
+      if(texteEl) texteEl.textContent = 'Choisir une date';
+    }
+  });
+  recalculerHoraire('VCM'); recalculerHoraire('Pionniers'); recalculerHoraire('Anciens'); recalculerHoraire('Weekend');
+  preRemplirDepuisCycle();
+}
+function determinerCycle(iso){
+  const mois = Number(iso.split('-')[1]);
+  return (mois>=3 && mois<=8) ? 2 : 1;
+}
+function chargerInfosCycle(numero){
+  const raw = localStorage.getItem('rc_cycle'+numero);
+  return raw ? JSON.parse(raw) : {};
+}
+function preRemplirDepuisCycle(){
+  // ne remplit QUE les champs encore vides : ne jamais écraser une saisie déjà faite pour cette semaine
+  const iso = affichageVersIso(val('res_vcmDate'));
+  if(!iso) return;
+  const info = chargerInfosCycle(determinerCycle(iso));
+  document.querySelectorAll('#tableVCM tbody tr').forEach(tr=>{
+    if(tr.dataset.type !== 'ligne') return;
+    const t = tr.querySelector('.ch-titre'); if(!t) return;
+    if(t.value === 'Discours de service'){
+      const st = tr.querySelector('.ch-soustitre'); if(st && !st.value) st.value = info.dsTheme || '';
+    }
+    if(t.value === 'Dernier Cantique'){
+      const nu = tr.querySelector('.ch-numero'); if(nu && !nu.value) nu.value = info.dsCantique || '';
+    }
+  });
+  document.querySelectorAll('#tablePionniers tbody tr').forEach(tr=>{
+    if(tr.dataset.type !== 'ligne') return;
+    const st = tr.querySelector('.ch-soustitre'); if(st && !st.value) st.value = info.pionniersTheme || '';
+  });
+  document.querySelectorAll('#tableAnciens tbody tr').forEach(tr=>{
+    if(tr.dataset.type !== 'ligne') return;
+    const st = tr.querySelector('.ch-soustitre'); if(st && !st.value) st.value = info.anciensTheme || '';
+  });
+  let compteurCantiqueWk = 0;
+  document.querySelectorAll('#tableWeekend tbody tr').forEach(tr=>{
+    if(tr.dataset.type !== 'ligne') return;
+    const t = tr.querySelector('.ch-titre'); if(!t) return;
+    if(t.value === 'Thème du discours public'){
+      const st = tr.querySelector('.ch-soustitre'); if(st && !st.value) st.value = info.discoursPublicTheme || '';
+    }
+    if(t.value === 'Thème du discours de service'){
+      const st = tr.querySelector('.ch-soustitre'); if(st && !st.value) st.value = info.discoursFinalTheme || '';
+    }
+    if(t.value === 'Cantique choisi par le RC'){
+      const nu = tr.querySelector('.ch-numero');
+      if(nu && !nu.value){ nu.value = compteurCantiqueWk === 0 ? (info.cantiqueDebutWeekend||'') : (info.cantiqueFinWeekend||''); }
+      compteurCantiqueWk++;
+    }
+  });
+}
+
+/* ================= Tables de programme ================= */
+function construireTable(nomReunion, lignes){
+  const tbody = document.querySelector('#table'+nomReunion+' tbody');
+  tbody.innerHTML = '';
+  lignes.forEach(l => ajouterLigneDOM(nomReunion, l));
+  recalculerHoraire(nomReunion);
+  synchroniserMiroirs(nomReunion);
+  synchroniserLiens(nomReunion);
+  if(nomReunion === 'VCM'){
+    insererBoutonGroupe('VCM', 'expose', "+ Ajouter un exposé", ()=>ajouterExpose());
+    insererBoutonGroupe('VCM', 'sujetVCM', "+ Ajouter un sujet VCM", ()=>ajouterSujetVCM());
+  }
+}
+function couleurSection(titre){
+  if(/joyaux/i.test(titre)) return {fond:'#4a8f9c', texte:'#ffffff'};
+  if(/applique-toi/i.test(titre)) return {fond:'#d4901f', texte:'#ffffff'};
+  if(/vie chr[ée]tienne/i.test(titre)) return {fond:'#8b2e2e', texte:'#ffffff'};
+  return {fond:'#ecdcc4', texte:'#8a5a3d'};
+}
+function afficherThemeCantique(inputEl){
+  const span = inputEl.nextSibling;
+  if(span && span.classList && span.classList.contains('cantique-theme')){
+    span.textContent = CANTIQUES[inputEl.value.trim()] || '';
+  }
+}
+function ajouterLigneDOM(nomReunion, ligne){
+  const tbody = document.querySelector('#table'+nomReunion+' tbody');
+  const tr = document.createElement('tr');
+  if(ligne.type === 'section'){
+    const c = couleurSection(ligne.titre);
+    tr.innerHTML = `<td class="titre-section" colspan="3" style="background:${c.fond} !important;"><input type="text" value="${esc(ligne.titre)}" class="ch-titre" style="font-weight:bold;text-transform:uppercase;background:transparent;color:${c.texte};"></td>
+      <td class="ligne-actions"><button class="btn-danger" onclick="supprimerLigne(this)">✕</button></td>`;
+    tr.dataset.type = 'section';
+  } else {
+    let cellDetails = '';
+    const aDesElements = ligne.numero || ligne.sousTitre || ligne.miroirDe || (ligne.roles && ligne.roles.length);
+    if(ligne.numero){
+      const themeInitial = CANTIQUES[String(ligne.numeroValeur||'').trim()] || '';
+      cellDetails += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;"><input type="text" class="ch-numero" placeholder="N°" style="width:52px;flex:none;" value="${esc(ligne.numeroValeur||'')}" oninput="afficherThemeCantique(this)"><span class="cantique-theme" style="font-size:11px;color:#3a2f28;">${esc(themeInitial)}</span></div>`;
+    }
+    if(ligne.sousTitre){
+      cellDetails += `<textarea class="ch-soustitre" rows="1" placeholder="Détail (thème, portion, cahier…)" style="margin-bottom:3px;">${esc(ligne.sousTitreValeur||'')}</textarea>`;
+    }
+    if(ligne.miroirDe){
+      cellDetails += `<span class="ch-miroir" data-miroir-de="${esc(ligne.miroirDe)}" style="font-style:italic;color:#8a7a6a;font-size:12px;display:block;">(reprend le nom de « ${esc(ligne.miroirDe)} »)</span>`;
+    }
+    if(ligne.roles && ligne.roles.length){
+      cellDetails += ligne.roles.map(role => `<span class="role-label">${esc(role)}</span><select class="ch-role" data-role="${esc(role)}"></select>`).join('');
+    }
+    if(!aDesElements){
+      if(nomReunion === 'VCM' || nomReunion === 'Weekend'){
+        ligne.roles = ['Intervenant'];
+        cellDetails = `<span class="role-label">Intervenant</span><select class="ch-role" data-role="Intervenant"></select>`;
+      } else {
+        cellDetails = `<textarea class="ch-det" rows="1">${esc(ligne.det||'')}</textarea>`;
+      }
+    }
+    tr.innerHTML = `
+      <td class="heure-min"><div class="ch-heure" style="font-weight:bold;"></div><input type="number" class="duree ch-min" value="${ligne.min||0}" min="0" style="width:64px;margin-top:2px;" onchange="recalculerHoraire('${nomReunion}')"></td>
+      <td><input type="text" class="ch-titre" value="${esc(ligne.titre||'')}"></td>
+      <td>${cellDetails}</td>
+      <td class="ligne-actions"><button class="btn-danger" onclick="supprimerLigne(this)">✕</button></td>`;
+    tr.dataset.type = 'ligne';
+    if(ligne.numero) tr.dataset.numero = '1';
+    if(ligne.sousTitre) tr.dataset.soustitre = '1';
+    if(ligne.miroirDe) tr.dataset.miroirDe = ligne.miroirDe;
+    if(ligne.groupe) tr.dataset.groupe = ligne.groupe;
+    if(ligne.suivRole) tr.dataset.suivRole = JSON.stringify(ligne.suivRole);
+  }
+  tbody.appendChild(tr);
+  // remplir + restaurer les valeurs des listes déroulantes de rôles
+  if(ligne.roles && ligne.roles.length){
+    tr.querySelectorAll('select.ch-role').forEach(sel=>{
+      remplirSelectRole(sel);
+      const role = sel.dataset.role;
+      const valeurExistante = ligne.valeurs && ligne.valeurs[role];
+      if(valeurExistante) sel.value = valeurExistante;
+      // si ce rôle suit automatiquement un autre (ex: prière finale = orateur du discours), on note s'il a déjà été choisi manuellement
+      if(ligne.suivRole && ligne.suivRole.role === role){
+        sel.dataset.autoSync = valeurExistante ? 'false' : 'true';
+        sel.addEventListener('change', ()=>{ sel.dataset.autoSync = 'false'; });
+      }
+      sel.addEventListener('change', ()=>{ synchroniserMiroirs(nomReunion); synchroniserLiens(nomReunion); });
+    });
+  }
+}
+function ajouterLigne(nomReunion){ ajouterLigneDOM(nomReunion, {type:'ligne', titre:'', min:5}); recalculerHoraire(nomReunion); }
+function ajouterSection(nomReunion){ ajouterLigneDOM(nomReunion, {type:'section', titre:'NOUVELLE SECTION'}); }
+function ajouterDansGroupe(nomReunion, groupe, modele){
+  const lignesActuelles = lireTable('table'+nomReunion);
+  let dernierIndex = -1;
+  lignesActuelles.forEach((l,i)=>{ if(l.groupe===groupe) dernierIndex = i; });
+  const nouvelleLigne = JSON.parse(JSON.stringify(modele));
+  if(dernierIndex === -1){ lignesActuelles.push(nouvelleLigne); }
+  else { lignesActuelles.splice(dernierIndex+1, 0, nouvelleLigne); }
+  construireTable(nomReunion, lignesActuelles);
+}
+function ajouterExpose(){
+  ajouterDansGroupe('VCM', 'expose', {type:'ligne', titre:'Exposé', min:5, roles:['Élève','Interlocuteur'], groupe:'expose'});
+}
+function ajouterSujetVCM(){
+  ajouterDansGroupe('VCM', 'sujetVCM', {type:'ligne', titre:'Sujet VCM', min:15, roles:['Frère'], groupe:'sujetVCM'});
+}
+function insererBoutonGroupe(nomReunion, groupe, libelle, fonctionAjout){
+  const tbody = document.querySelector('#table'+nomReunion+' tbody');
+  if(!tbody) return;
+  let dernierDuGroupe = null;
+  tbody.querySelectorAll('tr').forEach(tr=>{ if(tr.dataset.groupe === groupe) dernierDuGroupe = tr; });
+  if(!dernierDuGroupe) return;
+  const idBtn = 'btnGroupe_'+nomReunion+'_'+groupe;
+  window[idBtn] = fonctionAjout;
+  const trBouton = document.createElement('tr');
+  trBouton.dataset.type = 'bouton';
+  trBouton.innerHTML = `<td colspan="3" style="text-align:center;padding:6px;"><button type="button" class="btn-secondaire" style="font-size:12px;padding:5px 14px;" onclick="${idBtn}()">${libelle}</button></td><td></td>`;
+  dernierDuGroupe.parentNode.insertBefore(trBouton, dernierDuGroupe.nextSibling);
+}
+function supprimerLigne(btn){
+  const tr = btn.closest('tr'); const table = tr.closest('table').id.replace('table','');
+  tr.remove(); recalculerHoraire(table); synchroniserMiroirs(table); synchroniserLiens(table);
+}
+function recalculerHoraire(nomReunion){
+  const debutInput = document.getElementById({VCM:'res_vcmHeure', Pionniers:'res_pioHeure', Anciens:'res_ancHeure', Weekend:'res_wkHeure'}[nomReunion]);
+  if(!debutInput || !debutInput.value) return;
+  let [h,m] = debutInput.value.split(':').map(Number);
+  let minutes = h*60+m;
+  document.querySelectorAll('#table'+nomReunion+' tbody tr').forEach(tr=>{
+    if(tr.dataset.type !== 'ligne') return;
+    const heureCell = tr.querySelector('.ch-heure');
+    heureCell.textContent = String(Math.floor(minutes/60)%24).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');
+    minutes += Number(tr.querySelector('.ch-min').value||0);
+  });
+}
+function recalculerVCM(){ recalculerHoraire('VCM'); }
+function recalculerPionniers(){ recalculerHoraire('Pionniers'); }
+function recalculerAnciens(){ recalculerHoraire('Anciens'); }
+function recalculerWeekend(){ recalculerHoraire('Weekend'); }
+
+function synchroniserMiroirs(nomReunion){
+  const tbody = document.querySelector('#table'+nomReunion+' tbody');
+  if(!tbody) return;
+  const valeursParTitre = {};
+  tbody.querySelectorAll('tr').forEach(tr=>{
+    if(tr.dataset.type !== 'ligne') return;
+    const titreInput = tr.querySelector('.ch-titre');
+    const sel = tr.querySelector('select.ch-role');
+    if(titreInput && sel) valeursParTitre[titreInput.value.trim()] = sel.value;
+  });
+  tbody.querySelectorAll('.ch-miroir').forEach(span=>{
+    const source = span.dataset.miroirDe;
+    const valeur = valeursParTitre[source];
+    span.textContent = valeur ? valeur : `(reprend le nom de « ${source} » — à choisir ci-dessus)`;
+  });
+}
+
+function synchroniserLiens(nomReunion){
+  const tbody = document.querySelector('#table'+nomReunion+' tbody');
+  if(!tbody) return;
+  // valeur actuelle de chaque rôle, indexée par titre de ligne (mise à jour au fil de l'itération, dans l'ordre du tableau)
+  const valeursParTitreEtRole = {};
+  tbody.querySelectorAll('tr').forEach(tr=>{
+    if(tr.dataset.type !== 'ligne') return;
+    const titreInput = tr.querySelector('.ch-titre');
+    if(!titreInput) return;
+    const titre = titreInput.value.trim();
+    valeursParTitreEtRole[titre] = valeursParTitreEtRole[titre] || {};
+    tr.querySelectorAll('select.ch-role').forEach(sel=>{ valeursParTitreEtRole[titre][sel.dataset.role] = sel.value; });
+    // si cette ligne a un rôle qui suit un autre, on le met à jour maintenant (les lignes sources précédentes sont déjà à jour)
+    if(tr.dataset.suivRole){
+      const lien = JSON.parse(tr.dataset.suivRole);
+      const selCible = tr.querySelector('select.ch-role[data-role="'+lien.role+'"]');
+      if(selCible && selCible.dataset.autoSync !== 'false'){
+        const valeurSource = valeursParTitreEtRole[lien.deTitre] && valeursParTitreEtRole[lien.deTitre][lien.deRole];
+        if(valeurSource !== undefined){
+          selCible.value = valeurSource;
+          valeursParTitreEtRole[titre][lien.role] = valeurSource;
+        }
+      }
+    }
+  });
+}
+
+function lireTable(idTable){
+  const lignes = [];
+  document.querySelectorAll('#'+idTable+' tbody tr').forEach(tr=>{
+    if(tr.dataset.type === 'bouton') return;
+    if(tr.dataset.type === 'section'){
+      lignes.push({type:'section', titre: tr.querySelector('.ch-titre').value});
+    } else {
+      const ligneObj = { type:'ligne', titre: tr.querySelector('.ch-titre').value, min: Number(tr.querySelector('.ch-min').value||0) };
+      if(tr.dataset.numero === '1'){ ligneObj.numero = true; ligneObj.numeroValeur = tr.querySelector('.ch-numero').value; }
+      if(tr.dataset.soustitre === '1'){ ligneObj.sousTitre = true; ligneObj.sousTitreValeur = tr.querySelector('.ch-soustitre').value; }
+      if(tr.dataset.miroirDe){ ligneObj.miroirDe = tr.dataset.miroirDe; }
+      if(tr.dataset.groupe){ ligneObj.groupe = tr.dataset.groupe; }
+      if(tr.dataset.suivRole){ ligneObj.suivRole = JSON.parse(tr.dataset.suivRole); }
+      const rolesSelects = tr.querySelectorAll('select.ch-role');
+      if(rolesSelects.length){
+        ligneObj.roles = []; ligneObj.valeurs = {};
+        rolesSelects.forEach(sel=>{ ligneObj.roles.push(sel.dataset.role); ligneObj.valeurs[sel.dataset.role] = sel.value; });
+      } else if(!ligneObj.numero && !ligneObj.sousTitre && !ligneObj.miroirDe){
+        const detEl = tr.querySelector('.ch-det');
+        if(detEl) ligneObj.det = detEl.value;
+      }
+      lignes.push(ligneObj);
+    }
+  });
+  return lignes;
+}
+
+/* ================= Analyse du texte collé depuis wol.jw.org / jw.org ================= */
+function normaliser(s){
+  return s.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+}
+function determinerRoles(titre, section){
+  if(/lecture de la bible/i.test(titre)) return ['Élève'];
+  if(/discours de service/i.test(titre)) return ['Orateur'];
+  if(section === 'MINISTERE'){
+    if(/discours/i.test(titre)) return ['Élève'];
+    return ['Élève','Interlocuteur'];
+  }
+  if(section === 'JOYAUX') return ['Frère'];
+  return [];
+}
+function construireLigneWOL(titreBrut, min, section){
+  // il n'y a plus d'étude biblique de l'assemblée : on la remplace systématiquement par un discours de service
+  const titre = titreBrut.trim().replace(/[ée]tude biblique de l['’]assembl[ée]e|[ée]tude biblique de la congr[ée]gation/i, 'Discours de service');
+  const estCantique = /^cantique\s*\d+/i.test(titre);
+  if(estCantique){
+    const mNum = titre.match(/cantique\s*(\d+)/i);
+    const ligneCantique = { type:'ligne', titre:'Cantique', min: min||0, numero:true, numeroValeur: mNum ? mNum[1] : '' };
+    if(/pri[eè]re/i.test(titre)) ligneCantique.roles = ['Prière'];
+    return ligneCantique;
+  }
+  if(/lecture de la bible/i.test(titre)){
+    return { type:'ligne', titre, min: min||0, roles:['Élève'] };
+  }
+  if(/discours de service/i.test(titre)){
+    return { type:'ligne', titre, min: min||0, sousTitre:true, roles:['Orateur'] };
+  }
+  if(/paroles de conclusion/i.test(titre)){
+    return { type:'ligne', titre, min: min||0, miroirDe:'Président' };
+  }
+  if(section === 'JOYAUX'){
+    return { type:'ligne', titre, min: min||0, roles:['Frère'] };
+  }
+  if(section === 'MINISTERE'){
+    return { type:'ligne', titre, min: min||0, roles: determinerRoles(titre, section), groupe:'expose' };
+  }
+  if(section === 'VIE' && /^\d+\.\s/.test(titre)){
+    return { type:'ligne', titre, min: min||0, roles:['Frère'], groupe:'sujetVCM' };
+  }
+  const ligne = { type:'ligne', titre, min: min||0 };
+  const roles = determinerRoles(titre, section);
+  if(roles.length) ligne.roles = roles;
+  return ligne;
+}
+function analyserWOL(){
+  const texte = val('colleWOL');
+  if(!texte.trim()){ alert('Colle d\'abord le texte copié depuis wol.jw.org ou jw.org.'); return; }
+  if(/^https?:\/\/\S+$/i.test(texte.trim())){
+    const etatEl = document.getElementById('etatWOL');
+    etatEl.style.color = '#b3261e';
+    etatEl.textContent = "Ça, c'est le lien de la page — il faut coller le texte du programme lui-même (sélectionne le texte sur la page avec la souris, Ctrl+C, puis colle-le ici).";
+    return;
+  }
+
+  // on éclate aussi les lignes contenant un « | » (ex: "Paroles de conclusion (3 min) | Cantique 143 et prière")
+  const sousLignes = [];
+  texte.split('\n').forEach(l=>{
+    l.split('|').forEach(part=>{ const p = part.trim(); if(p) sousLignes.push(p); });
+  });
+
+  const SECTIONS = { 'JOYAUX DE LA PAROLE DE DIEU':'JOYAUX', 'APPLIQUE-TOI AU MINISTERE':'MINISTERE', 'VIE CHRETIENNE':'VIE' };
+  const nouvellesLignes = [];
+  let sectionCourante = null;
+  let indexEnAttente = -1; // index d'un item numéroté qui attend sa durée sur la ligne suivante
+
+  sousLignes.forEach(s=>{
+    if(s.length > 200) return; // paragraphes explicatifs, hors-sujet
+
+    const norm = normaliser(s);
+    if(SECTIONS[norm]){
+      nouvellesLignes.push({type:'section', titre:s});
+      sectionCourante = SECTIONS[norm];
+      indexEnAttente = -1;
+      return;
+    }
+
+    // titre + durée réunis sur la même ligne, ex: "Paroles d'introduction (1 min)"
+    // ou durée seule en début de ligne, ex: "(30 min) wcg chap. 7."
+    const mCombine = s.match(/^(.*?)\(\s*(\d+)\s*min\.?\s*\)\s*(.*)$/i);
+    if(mCombine){
+      const avant = mCombine[1].trim();
+      const duree = Number(mCombine[2]);
+      if(avant){
+        nouvellesLignes.push(construireLigneWOL(avant, duree, sectionCourante));
+        indexEnAttente = -1;
+      } else if(indexEnAttente >= 0){
+        nouvellesLignes[indexEnAttente].min = duree;
+        indexEnAttente = -1;
+      }
+      return;
+    }
+
+    // item numéroté, ex: "4. Engage la conversation" — la durée arrive souvent sur la ligne suivante
+    const mNum = s.match(/^(\d+)\.\s*(.+)$/);
+    if(mNum){
+      nouvellesLignes.push(construireLigneWOL(mNum[1]+'. '+mNum[2], 0, sectionCourante));
+      indexEnAttente = nouvellesLignes.length - 1;
+      return;
+    }
+
+    // cantique seul, sans durée ni numéro, ex: "Cantique 128" ou "Cantique 143 et prière"
+    if(/^cantique\s*\d+/i.test(s)){
+      nouvellesLignes.push(construireLigneWOL(s, 5, sectionCourante));
+      indexEnAttente = -1;
+      return;
+    }
+    // toute autre ligne (références bibliques, questions, notes) est ignorée
+  });
+
+  // on retire le tout premier et le tout dernier "Cantique" détectés pour construire
+  // une tête et un pied de programme fixes (Président / Prière / Paroles d'introduction miroir)
+  let numeroPremierCantique = '', numeroDernierCantique = '';
+  if(nouvellesLignes.length && nouvellesLignes[0].numero){
+    numeroPremierCantique = nouvellesLignes[0].numeroValeur;
+    nouvellesLignes.shift();
+    if(nouvellesLignes.length && /paroles d.introduction/i.test(nouvellesLignes[0].titre)){ nouvellesLignes.shift(); }
+  }
+  for(let i=nouvellesLignes.length-1; i>=0; i--){
+    if(nouvellesLignes[i].numero){
+      numeroDernierCantique = nouvellesLignes[i].numeroValeur;
+      nouvellesLignes.splice(i,1);
+      break;
+    }
+  }
+  const enTete = [
+    {type:'ligne', titre:'Président', min:0, roles:['Président']},
+    {type:'ligne', titre:'1er Cantique et prière', min:5, numero:true, numeroValeur:numeroPremierCantique, roles:['Prière']},
+    {type:'ligne', titre:"Paroles d'introduction", min:1, miroirDe:'Président'},
+  ];
+  const piedDePage = [
+    {type:'ligne', titre:'Dernier Cantique', min:5, numero:true, numeroValeur:numeroDernierCantique, roles:['Prière'], suivRole:{role:'Prière', deTitre:'Discours de service', deRole:'Orateur'}},
+  ];
+  let lignesFinales = enTete.concat(nouvellesLignes, piedDePage);
+  // dans le cahier, "Discours de service" (ex-étude biblique) vient avant "Paroles de conclusion" ;
+  // ici on les inverse pour que les paroles de conclusion précèdent le discours de service
+  const idxConclusion = lignesFinales.findIndex(l=>/paroles de conclusion/i.test(l.titre));
+  const idxDiscours = lignesFinales.findIndex(l=>/discours de service/i.test(l.titre));
+  if(idxConclusion !== -1 && idxDiscours !== -1 && idxConclusion > idxDiscours){
+    const [conclusion] = lignesFinales.splice(idxConclusion, 1);
+    lignesFinales.splice(idxDiscours, 0, conclusion);
+  }
+
+  const etatEl = document.getElementById('etatWOL');
+  if(!nouvellesLignes.length){
+    etatEl.style.color = '#b3261e';
+    etatEl.textContent = "Rien de reconnu automatiquement — vérifie/complète le programme à la main ci-dessous.";
+    return;
+  }
+  construireTable('VCM', lignesFinales);
+  etatEl.style.color = '#2e7d32';
+  etatEl.textContent = lignesFinales.length+' élément(s) détecté(s) — vérifie et complète le programme ci-dessous.';
+  setTimeout(()=>etatEl.textContent='', 5000);
+}
+
+/* ================= Sauvegarde / transfert entre appareils ================= */
+function exporterToutesDonnees(){
+  const data = {};
+  Object.keys(localStorage).filter(k=>k.startsWith('rc_')).forEach(k=>{ data[k] = localStorage.getItem(k); });
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const aujourdhui = new Date().toISOString().slice(0,10);
+  a.href = url; a.download = 'sauvegarde_outil_rc_' + aujourdhui + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  const etatEl = document.getElementById('etatSauvegarde');
+  etatEl.style.color = '#2e7d32';
+  etatEl.textContent = 'Fichier exporté ✓ — envoie-le sur ton autre appareil.';
+  setTimeout(()=>etatEl.textContent='', 4000);
+}
+function importerToutesDonnees(inputEl){
+  const fichier = inputEl.files[0];
+  if(!fichier) return;
+  const lecteur = new FileReader();
+  lecteur.onload = (e)=>{
+    let data;
+    try { data = JSON.parse(e.target.result); }
+    catch(err){ alert("Ce fichier n'est pas une sauvegarde valide : " + err.message); return; }
+    if(!confirm("Importer ce fichier va remplacer toutes les données déjà présentes sur cet appareil (profil, calendrier, proclamateurs, semaines). Continuer ?")) return;
+    Object.keys(data).forEach(k=>{ if(k.startsWith('rc_')) localStorage.setItem(k, data[k]); });
+    alert('Import réussi. La page va se recharger avec tes données.');
+    location.reload();
+  };
+  lecteur.readAsText(fichier);
+}
+
+/* ================= Démarrage ================= */
+window.addEventListener('load', ()=>{
+  chargerProfil();
+  chargerCycle(1); chargerCycle(2);
+  rendreCongregations();
+  rendreCalendrier();
+  rendreParametresCouleurs();
+  rendreListeRcSrc();
+  rafraichirTousLesSelectsRoles();
+  majListeSemaines();
+  const semaines = listerSemaines();
+  if(semaines.length){ chargerSemaineDonnees(JSON.parse(localStorage.getItem(semaines[0]))); }
+  else { Object.keys(MODELES).forEach(r=>construireTable(r, MODELES[r])); }
+});
+</script>
+</body>
+</html>
